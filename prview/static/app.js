@@ -319,7 +319,7 @@ function renderSummary() {
   decEl.innerHTML = `Review: <span class="${dec.cls}">${dec.g}</span> ${dec.label}`;
   const submit = document.createElement("button");
   submit.className = "btn btn-primary submit-entry";
-  submit.innerHTML = 'Submit (<span class="kbd">s</span>)';
+  submit.innerHTML = 'Submit <span class="kbd">s</span>';
   submit.addEventListener("click", () => show("submit"));
   statusRow.append(ciEl, decEl, submit);
 
@@ -364,10 +364,22 @@ function renderFileList() {
     marker.textContent = i === State.idx ? "▸" : "";
     marker.setAttribute("aria-hidden", "true");
 
+    // Lead with the basename (always fully visible); the directory is dimmed and
+    // truncates first, so files with a shared prefix stay distinguishable.
     const name = document.createElement("span");
     name.className = "fl-name";
-    name.textContent = f.filename;
     name.title = f.filename;
+    const slash = f.filename.lastIndexOf("/");
+    const base = document.createElement("span");
+    base.className = "fl-base";
+    base.textContent = slash >= 0 ? f.filename.slice(slash + 1) : f.filename;
+    name.appendChild(base);
+    if (slash >= 0) {
+      const dir = document.createElement("span");
+      dir.className = "fl-dir";
+      dir.textContent = f.filename.slice(0, slash);
+      name.appendChild(dir);
+    }
 
     const counts = document.createElement("span");
     counts.className = "fl-counts";
@@ -703,9 +715,8 @@ function renderAiPanel(path) {
   // State B / C — result
   const body = document.createElement("div");
   body.className = "ai-body";
-  if (ai.mode === "explain") body.textContent = ai.result || "";
-  else if (ai.mode === "ask") body.textContent = ai.result || ""; // (summary stays visible below if present)
-  else body.textContent = ai.result || (ai.status === "idle" ? "Loading summary…" : "");
+  const resultText = ai.result || (ai.mode === "summary" && ai.status === "idle" ? "Loading summary…" : "");
+  renderMarkdown(body, resultText);
   el.appendChild(body);
 
   // Ask Q/A block (State C) shown beneath whatever body we have.
@@ -713,7 +724,12 @@ function renderAiPanel(path) {
     el.appendChild(divider());
     const qa = document.createElement("div");
     qa.className = "ai-qa";
-    qa.innerHTML = `<div class="ai-q">Q: ${escapeHtml(ai.qa.q)}</div><div>A: ${escapeHtml(ai.qa.a)}</div>`;
+    const q = document.createElement("div");
+    q.className = "ai-q";
+    q.textContent = `Q: ${ai.qa.q}`;
+    const a = document.createElement("div");
+    renderMarkdown(a, ai.qa.a || "");
+    qa.append(q, a);
     el.appendChild(qa);
   }
 
@@ -750,6 +766,72 @@ function focusAsk() {
 
 function divider() { const hr = document.createElement("hr"); hr.className = "ai-divider"; return hr; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+// Minimal, XSS-safe markdown → DOM renderer for AI output. Builds nodes via
+// textContent only (never innerHTML with model text). Handles paragraphs,
+// bullet lists, headings, `code`/**bold**/*italic*, and decorative separators.
+function renderInline(parent, text) {
+  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const tok = m[0];
+    let node;
+    if (tok[0] === "`") { node = document.createElement("code"); node.textContent = tok.slice(1, -1); }
+    else if (tok.startsWith("**")) { node = document.createElement("strong"); node.textContent = tok.slice(2, -2); }
+    else { node = document.createElement("em"); node.textContent = tok.slice(1, -1); }
+    parent.appendChild(node);
+    last = m.index + tok.length;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function isSeparatorLine(line) {
+  const t = line.trim();
+  return t.length >= 3 && /^[\s─—–=_·•*-]+$/.test(t) && /[─—–=_]/.test(t);
+}
+
+function renderMarkdown(el, text) {
+  el.textContent = "";
+  if (!text) return;
+  const lines = String(text).split("\n");
+  let i = 0, para = [];
+  const flush = () => {
+    if (!para.length) return;
+    const p = document.createElement("p");
+    renderInline(p, para.join(" "));
+    el.appendChild(p);
+    para = [];
+  };
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (t === "") { flush(); i++; continue; }
+    if (isSeparatorLine(lines[i])) { flush(); el.appendChild(document.createElement("hr")); i++; continue; }
+    if (/^#{1,6}\s+/.test(t)) {
+      flush();
+      const h = document.createElement("div");
+      h.className = "ai-md-h";
+      renderInline(h, t.replace(/^#{1,6}\s+/, ""));
+      el.appendChild(h);
+      i++; continue;
+    }
+    if (/^[-*]\s+/.test(t)) {
+      flush();
+      const ul = document.createElement("ul");
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        const li = document.createElement("li");
+        renderInline(li, lines[i].trim().replace(/^[-*]\s+/, ""));
+        ul.appendChild(li);
+        i++;
+      }
+      el.appendChild(ul);
+      continue;
+    }
+    para.push(t);
+    i++;
+  }
+  flush();
+}
 
 // ============================================================================
 // Actions: viewed / flag / comment

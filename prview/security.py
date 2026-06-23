@@ -69,6 +69,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             supplied = request.headers.get(TOKEN_HEADER) or request.query_params.get("token")
             if not expected or supplied != expected:
                 return _reject(401, "Missing or invalid session token",
-                               "reopen the URL printed by ./prview")
+                               "reopen the URL printed by `uv run prview`")
 
         return await call_next(request)

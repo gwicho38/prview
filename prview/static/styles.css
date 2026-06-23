@@ -111,7 +111,20 @@ a { color: var(--accent); }
   font-size: 13px;
 }
 .btn-danger { color: var(--red); border-color: var(--red); }
-.kbd { text-decoration: underline; text-underline-offset: 2px; }
+.kbd {
+  display: inline-block;
+  min-width: 1.1em;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+  font-family: var(--mono);
+  font-size: 0.82em;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  text-align: center;
+  text-decoration: none;
+}
 
 /* ---- Landing ----------------------------------------------------------- */
 .landing-wrap { max-width: 760px; margin: 48px auto; padding: 0 20px; }
@@ -250,7 +263,9 @@ a { color: var(--accent); }
 .fl-row:hover { background: var(--bg-elev-2); }
 .fl-row.current { background: var(--bg-elev-2); box-shadow: inset 3px 0 0 var(--accent); }
 .fl-marker { color: var(--accent); width: 16px; }
-.fl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.fl-base { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.fl-dir { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-dim); font-size: 11px; min-width: 0; }
 .fl-counts { color: var(--fg-muted); }
 .fl-counts .ps-adds, .fl-counts .ps-dels { margin-left: 4px; }
 .fl-badges { display: inline-flex; gap: 4px; min-width: 14px; }
@@ -261,7 +276,7 @@ a { color: var(--accent); }
 .file-detail {
   grid-area: detail;
   overflow: auto;
-  padding: 16px 20px;
+  padding: 16px 20px 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -270,7 +285,21 @@ a { color: var(--accent); }
 .fd-header { display: flex; align-items: baseline; gap: 14px; font-family: var(--mono); }
 .fd-header .fd-name { font-size: 15px; font-weight: 600; }
 
-.action-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* Pinned to the bottom of the scrolling detail pane so actions stay reachable.
+   Opaque background + top border so scrolling diff content never bleeds through. */
+.action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 -20px;           /* span the file-detail horizontal padding */
+  padding: 10px 20px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
 .action-bar .ab-label { color: var(--fg-muted); font-size: 13px; margin-right: 4px; }
 
 /* ---- AI panel ---------------------------------------------------------- */
@@ -282,7 +311,15 @@ a { color: var(--accent); }
 }
 .ai-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .ai-head .ai-title { font-family: var(--mono); font-size: 13px; color: var(--fg-muted); }
-.ai-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.55; }
+.ai-body { font-size: 13.5px; line-height: 1.55; }
+.ai-body p { margin: 0 0 10px; }
+.ai-body > :last-child { margin-bottom: 0; }
+.ai-body ul { margin: 0 0 10px; padding-left: 20px; }
+.ai-body li { margin: 2px 0; }
+.ai-body code { font-family: var(--mono); font-size: 0.9em; background: var(--bg-elev-2); padding: 1px 5px; border-radius: 4px; }
+.ai-body strong { color: var(--fg); font-weight: 600; }
+.ai-body hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
+.ai-body .ai-md-h { font-weight: 600; margin: 8px 0 4px; }
 .ai-loading { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; color: var(--fg-muted); }
 .ai-error { color: var(--red); display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; }
 .ai-divider { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
@@ -307,32 +344,26 @@ a { color: var(--accent); }
 
 /* ---- Diff -------------------------------------------------------------- */
 .diff-region { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-/* diff2html dark scheme (enabled in JS) provides the palette; these rules tune
-   it for legibility: bigger type, roomier lines, calmer line numbers/gutters. */
-.diff-region .d2h-wrapper {
-  font-size: 13px;
-  font-family: var(--mono);
-}
+/* diff2html dark scheme (enabled in JS) provides the palette. Tune for legibility
+   WITHOUT touching the horizontal box: diff2html positions the line number
+   absolutely and reserves space for it via the code line's left padding
+   (padding: 0 4.5em). Overriding that padding clips the code under the gutter,
+   so here we only adjust line-height / colors — never horizontal padding. */
+.diff-region .d2h-wrapper { font-size: 13px; font-family: var(--mono); }
 .diff-region .d2h-code-line,
-.diff-region .d2h-code-side-line {
-  padding: 1px 8px;
-  line-height: 1.6;
-}
-.diff-region .d2h-code-side-linenumber {
-  color: var(--fg-dim);
-  background: var(--bg);
-  border-color: var(--border);
-}
-/* Unchanged context lines: full-strength foreground (the light theme dimmed them). */
-.diff-region .d2h-cntx .d2h-code-side-line,
-.diff-region .d2h-code-side-line { color: var(--fg); }
+.diff-region .d2h-code-side-line { line-height: 1.6; color: var(--fg); }
+/* Each side scrolls horizontally so long lines stay reachable (no content cut off). */
+.diff-region .d2h-file-side-diff { overflow-x: auto; }
+.diff-region .d2h-code-side-linenumber { color: var(--fg-dim); border-color: var(--border); }
 /* Soften the per-line add/del wash so changed *words* stand out, not whole rows. */
 .diff-region .d2h-ins { background: rgba(46, 160, 67, 0.13); }
 .diff-region .d2h-del { background: rgba(248, 81, 73, 0.13); }
 .diff-region .d2h-ins ins { background: rgba(46, 160, 67, 0.40); text-decoration: none; border-radius: 2px; }
 .diff-region .d2h-del del { background: rgba(248, 81, 73, 0.40); text-decoration: none; border-radius: 2px; }
 .diff-region .d2h-info { background: var(--bg-elev); color: var(--fg-muted); }
-.diff-region .d2h-file-header { background: var(--bg-elev); border-color: var(--border); }
+/* The filename already shows in .fd-header above the panel — hide diff2html's
+   own per-file header to avoid showing it twice. */
+.diff-region .d2h-file-header { display: none; }
 .diff-placeholder { padding: 24px; text-align: center; color: var(--fg-muted); font-family: var(--mono); }
 .diff-loading { padding: 24px; text-align: center; color: var(--fg-muted); }
 

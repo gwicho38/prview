@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>prview</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>%F0%9F%94%8D</text></svg>" />
+  <link rel="stylesheet" href="/static/vendor/diff2html.min.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="appbar">
+      <button class="brand" id="brand" title="prview — back to landing">prview</button>
+      <span class="env-indicator">localhost · gh+claude</span>
+    </header>
+
+    <!-- screen:landing -->
+    <main class="screen" id="screen-landing">
+      <div class="landing-wrap">
+        <div class="card">
+          <h2>Load a Pull Request</h2>
+          <div class="load-row">
+            <input
+              class="text-input"
+              id="pr-ref-input"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="owner/repo#123  or  github.com URL"
+              aria-label="Pull request reference"
+              aria-describedby="pr-ref-hint pr-ref-error" />
+            <button class="btn btn-primary" id="load-pr-btn">Load PR <span aria-hidden="true">↵</span></button>
+          </div>
+          <div class="field-hint" id="pr-ref-hint">Accepts <code>owner/repo#123</code> or a full GitHub PR URL.</div>
+          <div class="field-error" id="pr-ref-error" role="alert" hidden></div>
+        </div>
+
+        <div class="section-title">Resume in-progress reviews</div>
+        <div class="resume-list" id="resume-list" role="list"></div>
+      </div>
+    </main>
+
+    <!-- screen:review -->
+    <main class="screen" id="screen-review" hidden>
+      <div class="review-grid">
+        <!-- component:pr-summary -->
+        <section class="pr-summary" id="pr-summary" aria-label="Pull request summary"></section>
+
+        <!-- component:file-list -->
+        <nav class="file-list" id="file-list" aria-label="Changed files"></nav>
+
+        <!-- component:file-detail -->
+        <section class="file-detail" id="file-detail" aria-label="File detail"></section>
+      </div>
+    </main>
+
+    <!-- screen:submit-review -->
+    <main class="screen" id="screen-submit" hidden>
+      <div class="submit-wrap" id="submit-body"></div>
+    </main>
+  </div>
+
+  <!-- shared modal root -->
+  <div class="modal-backdrop" id="modal-root" hidden></div>
+
+  <!-- toast stack -->
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+  <!-- screen-reader live region for async AI job announcements -->
+  <div class="visually-hidden" id="aria-live" role="status" aria-live="polite"></div>
+
+  <script src="/static/vendor/diff2html.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

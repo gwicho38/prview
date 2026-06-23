@@ -3,6 +3,7 @@ from prview.core import (
     PRInfo,
     build_ask_prompt,
     build_explain_prompt,
+    build_explain_selection_prompt,
     build_summary_prompt,
 )
 
@@ -96,3 +97,21 @@ def test_ask_prompt_truncates_body_to_1000_and_diff_to_8000():
     assert "B" * 1001 not in prompt
     assert "z" * 8000 in prompt
     assert "z" * 8001 not in prompt
+
+
+def test_explain_selection_prompt_includes_snippet_and_context():
+    pr, fd = _pr(), _fd("diff body\n")
+    prompt = build_explain_selection_prompt(pr, fd, "def handle(self):\n    pass")
+    # snippet is embedded, plus file + diff context, and the "only this snippet" steer
+    assert "def handle(self):\n    pass" in prompt
+    assert fd.filename in prompt
+    assert "diff body" in prompt
+    assert "only this snippet" in prompt
+
+
+def test_explain_selection_prompt_caps_selection_and_diff():
+    pr = _pr()
+    fd = _fd("z" * 9000)
+    prompt = build_explain_selection_prompt(pr, fd, "s" * 3000)
+    assert "s" * 2000 in prompt and "s" * 2001 not in prompt   # selection capped at 2000
+    assert "z" * 8000 in prompt and "z" * 8001 not in prompt   # diff capped at 8000

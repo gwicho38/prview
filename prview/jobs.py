@@ -20,6 +20,7 @@ from prview.core import (
     PRInfo,
     build_ask_prompt,
     build_explain_prompt,
+    build_explain_selection_prompt,
     build_summary_prompt,
 )
 
@@ -145,7 +146,7 @@ def cancel_job(job_id: str) -> bool:
     return True
 
 
-_KIND_TIMEOUTS = {"summary": 60, "explain": 300, "ask": 300}
+_KIND_TIMEOUTS = {"summary": 60, "explain": 300, "ask": 300, "explain-selection": 300}
 
 
 def start_summary(pr: PRInfo, fd: FileDiff) -> str:
@@ -159,3 +160,11 @@ def start_explain(pr: PRInfo, fd: FileDiff) -> str:
 
 def start_ask(pr: PRInfo, fd: FileDiff, question: str) -> str:
     return start_job("ask", build_ask_prompt(pr, fd, question), timeout=_KIND_TIMEOUTS["ask"])
+
+
+def start_explain_selection(pr: PRInfo, fd: FileDiff, selection: str) -> str:
+    return start_job(
+        "explain-selection",
+        build_explain_selection_prompt(pr, fd, selection),
+        timeout=_KIND_TIMEOUTS["explain-selection"],
+    )

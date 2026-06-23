@@ -197,3 +197,17 @@ def build_ask_prompt(pr: PRInfo, fd: FileDiff, question: str) -> str:
         f"User question: {question}\n\n"
         f"Answer concisely based on the diff and PR context."
     )
+
+
+def build_explain_selection_prompt(pr: PRInfo, fd: FileDiff, selection: str) -> str:
+    """Explain one reviewer-highlighted snippet in the context of the file diff."""
+    return (
+        f"You are a code reviewer.\n\n"
+        f"PR: {pr.title} (#{pr.number}) by {pr.author}\n\n"
+        f"File: {fd.filename}\n"
+        f"Diff:\n```diff\n{fd.diff_text[:8000]}\n```\n\n"
+        f"The reviewer highlighted this specific snippet:\n```\n{selection[:2000]}\n```\n\n"
+        f"Explain only this snippet, in the context of the file and diff above: what it "
+        f"does, how it works mechanically, and why the change matters. Be concise and "
+        f"specific to the highlighted lines — do not summarize the whole file."
+    )

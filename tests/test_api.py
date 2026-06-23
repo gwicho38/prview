@@ -124,6 +124,29 @@ def test_ai_explain_stale_cache_409(client, monkeypatch):
     assert "error" in resp.json()
 
 
+def test_ai_explain_selection(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        jobs, "start_explain_selection",
+        lambda pr, fd, selection: captured.update(selection=selection) or "job-sel",
+    )
+    resp = client.post("/ai/explain-selection", json={
+        "owner": "octo", "repo": "hello", "number": 7, "path": "big.py",
+        "selection": "def handle(self):",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["job_id"] == "job-sel"
+    assert captured["selection"] == "def handle(self):"
+
+
+def test_ai_explain_selection_stale_cache_409(client):
+    resp = client.post("/ai/explain-selection", json={
+        "owner": "ghost", "repo": "x", "number": 9, "path": "a.py", "selection": "xyz",
+    })
+    assert resp.status_code == 409
+
+
 def test_file_viewed_remote_ok(client, monkeypatch):
     _load_pr(client, monkeypatch)
     monkeypatch.setattr(gh, "mark_file_viewed", lambda o, r, n, p: True)

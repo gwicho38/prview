@@ -81,6 +81,10 @@ class AskRequest(FileTarget):
     question: str
 
 
+class ExplainSelectionRequest(FileTarget):
+    selection: str
+
+
 class FlagRequest(FileTarget):
     flagged: bool
     note: str = ""

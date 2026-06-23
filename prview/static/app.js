@@ -457,7 +457,12 @@ function renderFileDetail() {
 
   const actions = buildActionBar(f);
 
-  el.append(header, aiPanel, diffRegion, actions);
+  // Scrolling content (header + AI panel + diff) lives in its own region; the
+  // action bar is a fixed-height row beneath it, so it never overlaps the diff.
+  const scroll = document.createElement("div");
+  scroll.className = "fd-scroll";
+  scroll.append(header, aiPanel, diffRegion);
+  el.append(scroll, actions);
 
   loadDiff(f.filename, diffRegion);
   startSummary(f.filename, false); // auto-submit summary on select
@@ -540,6 +545,129 @@ function renderDiff(detail, region) {
 }
 
 // ============================================================================
+// Inline "explain selection": highlight text in the diff → floating button →
+// AI explanation in a popover anchored to the selection (independent of the
+// per-file AI panel).
+// ============================================================================
+const SelExplain = { btn: null, pop: null, jobId: null, alive: false };
+
+function selPopoverOpen() { return !!SelExplain.pop; }
+
+// Returns {text, rect} if there's a non-trivial selection inside #diff-region.
+function diffSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const region = document.getElementById("diff-region");
+  if (!region || !region.contains(sel.anchorNode)) return null;
+  const text = sel.toString().trim();
+  if (text.length < 3) return null;
+  return { text, rect: sel.getRangeAt(0).getBoundingClientRect() };
+}
+
+function hideSelExplainBtn() {
+  if (SelExplain.btn) { SelExplain.btn.remove(); SelExplain.btn = null; }
+}
+
+function refreshSelExplainBtn() {
+  if (SelExplain.pop) return; // popover open — don't re-show the button
+  const info = diffSelection();
+  if (!info) { hideSelExplainBtn(); return; }
+  hideSelExplainBtn();
+  const b = document.createElement("button");
+  b.className = "sel-explain-btn";
+  b.textContent = "✨ Explain selection";
+  b.style.top = `${Math.max(8, info.rect.top - 38)}px`;
+  b.style.left = `${Math.max(8, info.rect.left)}px`;
+  // mousedown (not click): preventDefault keeps the selection alive so we can
+  // read it, and stopPropagation avoids the outside-click dismiss handler.
+  b.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openSelPopover(info.text, info.rect);
+  });
+  document.body.appendChild(b);
+  SelExplain.btn = b;
+}
+
+function closeSelPopover() {
+  SelExplain.alive = false;
+  SelExplain.jobId = null;
+  if (SelExplain.pop) { SelExplain.pop.remove(); SelExplain.pop = null; }
+}
+
+function openSelPopover(selection, rect) {
+  hideSelExplainBtn();
+  closeSelPopover(); // a new selection-explain replaces any prior popover
+  const pop = document.createElement("div");
+  pop.className = "sel-popover";
+  pop.style.top = `${Math.min(window.innerHeight - 240, rect.bottom + 8)}px`;
+  pop.style.left = `${Math.min(window.innerWidth - 436, Math.max(8, rect.left))}px`;
+
+  const head = document.createElement("div");
+  head.className = "sel-pop-head";
+  const ttl = document.createElement("span");
+  ttl.textContent = "AI · Explain selection";
+  const close = document.createElement("button");
+  close.className = "sel-pop-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "✕";
+  close.addEventListener("click", closeSelPopover);
+  head.append(ttl, close);
+
+  const body = document.createElement("div");
+  body.className = "sel-pop-body";
+  body.innerHTML = '<div class="ai-loading"><span class="spinner"></span> Explaining…</div>';
+
+  pop.append(head, body);
+  document.body.appendChild(pop);
+  SelExplain.pop = pop;
+  SelExplain.alive = true;
+  runSelExplain(selection, body);
+}
+
+async function runSelExplain(selection, body) {
+  const f = currentFile();
+  if (!f) { closeSelPopover(); return; }
+  const setError = (msg) => {
+    body.innerHTML = "";
+    const e = document.createElement("div");
+    e.className = "ai-error";
+    e.textContent = `⚠ ${msg}`;
+    body.appendChild(e);
+  };
+  try {
+    const { job_id } = await api("POST", "/ai/explain-selection",
+      { ...prKey(), path: f.filename, selection });
+    SelExplain.jobId = job_id;
+    pollJobId(job_id, {
+      alive: () => SelExplain.alive && SelExplain.jobId === job_id,
+      onDone: (snap) => {
+        body.innerHTML = "";
+        const d = document.createElement("div");
+        d.className = "ai-body";
+        renderMarkdown(d, snap.result || "");
+        body.appendChild(d);
+      },
+      onError: (snap) => setError(snap.error || "claude call failed"),
+    });
+  } catch (e) {
+    setError(e.message + (e.hint ? ` — ${e.hint}` : ""));
+  }
+}
+
+let _selExplainInit = false;
+function initSelExplain() {
+  if (_selExplainInit) return;
+  _selExplainInit = true;
+  document.addEventListener("selectionchange", () => requestAnimationFrame(refreshSelExplainBtn));
+  // Dismiss the popover when clicking outside it.
+  document.addEventListener("mousedown", (e) => {
+    if (SelExplain.pop && !SelExplain.pop.contains(e.target)) closeSelPopover();
+  });
+}
+initSelExplain();
+
+// ============================================================================
 // component:ai-panel — submit→poll→result/error/cancel; live-region announce
 // ============================================================================
 const POLL_MS = 2000;
@@ -599,35 +727,49 @@ async function launchJob(path, endpoint, body) {
   }
 }
 
+// Generic poller over the /job/{id} contract. `alive()` returning false stops it
+// (cancel / dismiss). One implementation, reused by the per-file AI panel and the
+// selection-explain popover — no second polling loop.
+function pollJobId(jobId, { onTick, onDone, onError, alive }) {
+  const tick = async () => {
+    if (alive && !alive()) return;
+    let snap;
+    try {
+      snap = await api("GET", `/job/${jobId}`);
+    } catch {
+      setTimeout(tick, POLL_MS); // transient; keep polling
+      return;
+    }
+    if (alive && !alive()) return;
+    if (snap.status === "done") onDone(snap);
+    else if (snap.status === "error") onError(snap);
+    else { if (onTick) onTick(snap); setTimeout(tick, POLL_MS); }
+  };
+  setTimeout(tick, POLL_MS);
+}
+
 function pollJob(path) {
   const ai = aiFor(path);
   if (ai.status !== "running" || !ai.jobId) return;
-  ai.timer = setTimeout(async () => {
-    let snap;
-    try {
-      snap = await api("GET", `/job/${ai.jobId}`);
-    } catch {
-      pollJob(path); // transient; keep polling
-      return;
-    }
-    if (ai.status !== "running") return; // cancelled meanwhile
-    ai.elapsed = snap.elapsed;
-    if (snap.status === "done") {
+  pollJobId(ai.jobId, {
+    alive: () => ai.status === "running",
+    onTick: (snap) => { ai.elapsed = snap.elapsed; if (isCurrent(path)) renderAiPanel(path); },
+    onDone: (snap) => {
+      ai.elapsed = snap.elapsed;
       ai.status = "done";
       if (ai.mode === "ask") ai.qa = { q: ai.question, a: snap.result || "" };
       else ai.result = snap.result || "";
       if (isCurrent(path)) renderAiPanel(path);
       announce("AI response ready");
-    } else if (snap.status === "error") {
+    },
+    onError: (snap) => {
+      ai.elapsed = snap.elapsed;
       ai.status = "error";
       ai.error = snap.error || "claude call failed";
       if (isCurrent(path)) renderAiPanel(path);
       announce("AI request failed");
-    } else {
-      if (isCurrent(path)) renderAiPanel(path); // refresh elapsed timer
-      pollJob(path);
-    }
-  }, POLL_MS);
+    },
+  });
 }
 
 async function cancelJob(path) {
@@ -1194,6 +1336,12 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" || (e.key === "q" && !isTyping(e))) { e.preventDefault(); closeModal(); }
     return;
   }
+  // Selection-explain popover: Escape closes it; swallow other shortcuts so the
+  // reviewer can read it without j/k/e/etc. firing underneath.
+  if (selPopoverOpen()) {
+    if (e.key === "Escape") { e.preventDefault(); closeSelPopover(); }
+    return;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
   if (activeScreen === "submit") {
@@ -1202,6 +1350,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (activeScreen !== "review") return;
   if (isTyping(e)) return;
+  if (diffSelection()) return; // user is selecting diff text — don't navigate/act
 
   switch (e.key) {
     case "j": e.preventDefault(); navTo(1); break;

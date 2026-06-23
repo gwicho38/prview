@@ -275,27 +275,37 @@ a { color: var(--accent); }
 /* file-detail */
 .file-detail {
   grid-area: detail;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.fd-scroll {
+  flex: 1 1 auto;
   overflow: auto;
-  padding: 16px 20px 0;
+  min-height: 0;
+  padding: 16px 20px 8px;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
+/* Children size to content and never shrink — otherwise the flex column would
+   collapse the overflow:hidden diff region (min-height:0) to fit and clip it,
+   instead of letting .fd-scroll scroll. */
+.fd-scroll > * { flex: 0 0 auto; }
 .fd-empty { color: var(--fg-muted); margin: auto; font-family: var(--mono); }
 .fd-header { display: flex; align-items: baseline; gap: 14px; font-family: var(--mono); }
 .fd-header .fd-name { font-size: 15px; font-weight: 600; }
 
-/* Pinned to the bottom of the scrolling detail pane so actions stay reachable.
-   Opaque background + top border so scrolling diff content never bleeds through. */
+/* A fixed-height row beneath the scrolling .fd-scroll region (not in the scroll
+   flow), so it never overlaps the diff and the last diff line is always visible. */
 .action-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin: 0 -20px;           /* span the file-detail horizontal padding */
   padding: 10px 20px;
   background: var(--bg);
   border-top: 1px solid var(--border);
@@ -352,6 +362,12 @@ a { color: var(--accent); }
 .diff-region .d2h-wrapper { font-size: 13px; font-family: var(--mono); }
 .diff-region .d2h-code-line,
 .diff-region .d2h-code-side-line { line-height: 1.6; color: var(--fg); }
+/* Code text must be selectable for the "explain selection" feature — diff2html
+   marks side-by-side lines user-select:none; force text-selectable on the code
+   content (line-number gutters stay unselectable). */
+.diff-region .d2h-code-line,
+.diff-region .d2h-code-side-line,
+.diff-region .d2h-code-line-ctn { -webkit-user-select: text; user-select: text; }
 /* Scroll horizontally so long lines stay reachable (no content cut off) — in both
    line-by-line (.d2h-file-diff) and side-by-side (.d2h-file-side-diff) layouts. */
 .diff-region .d2h-file-diff,
@@ -368,6 +384,49 @@ a { color: var(--accent); }
 .diff-region .d2h-file-header { display: none; }
 .diff-placeholder { padding: 24px; text-align: center; color: var(--fg-muted); font-family: var(--mono); }
 .diff-loading { padding: 24px; text-align: center; color: var(--fg-muted); }
+
+/* ---- Inline "explain selection" --------------------------------------- */
+.sel-explain-btn {
+  position: fixed;
+  z-index: 50;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.sel-explain-btn:hover { border-color: var(--accent); }
+.sel-popover {
+  position: fixed;
+  z-index: 60;
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+.sel-pop-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.sel-pop-close { background: none; border: 0; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
+.sel-pop-close:hover { color: var(--fg); }
+.sel-pop-body { padding: 12px; }
 
 /* ---- Modal ------------------------------------------------------------- */
 .modal-backdrop {

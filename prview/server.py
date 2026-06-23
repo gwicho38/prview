@@ -32,6 +32,7 @@ import prview.state_store as state_store
 from prview.api_models import (
     AskRequest,
     CommentRequest,
+    ExplainSelectionRequest,
     FileDetail,
     FileListItem,
     FileTarget,
@@ -172,6 +173,12 @@ async def ai_explain(req: FileTarget) -> JobIdResponse:
 async def ai_ask(req: AskRequest) -> JobIdResponse:
     pr, fd = _cached_file(req.owner, req.repo, req.number, req.path)
     return JobIdResponse(job_id=jobs.start_ask(pr, fd, req.question))
+
+
+@app.post("/ai/explain-selection", response_model=JobIdResponse)
+async def ai_explain_selection(req: ExplainSelectionRequest) -> JobIdResponse:
+    pr, fd = _cached_file(req.owner, req.repo, req.number, req.path)
+    return JobIdResponse(job_id=jobs.start_explain_selection(pr, fd, req.selection))
 
 
 @app.get("/job/{job_id}", response_model=JobStatusResponse)

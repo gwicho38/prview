@@ -1,5 +1,7 @@
 # prview
 
+[![CI](https://github.com/gwicho38/prview/actions/workflows/ci.yml/badge.svg)](https://github.com/gwicho38/prview/actions/workflows/ci.yml)
+
 A portable, local-server web app for reviewing GitHub pull requests file-by-file in your browser, with AI assistance. It ports the logic of the `mcli` `pr-review` CLI workflow to a graphical UI while reusing your existing `gh` and `claude` CLIs — no API keys, no tokens to manage.
 
 ![Review workspace](docs/screenshots/03-review-loaded.png)
@@ -48,8 +50,28 @@ Reopen `prview` later and pick the PR from the resume list — your viewed/flagg
 
 ## Development
 
+Common tasks are wrapped in the `Makefile` (`make help` to list them):
+
 ```sh
-uv run pytest        # full test suite
+make install        # uv sync (deps + dev group)
+make test           # uv run pytest — full suite
+make run            # launch prview
+make docker-build   # build the container image
 ```
 
 The codebase keeps a pure functional core (`prview/core.py`) with all subprocess / filesystem / network I/O pushed to the edges (`gh.py`, `jobs.py`, `state_store.py`, `server.py`). The diff renderer (diff2html) is vendored under `prview/static/vendor/` — the app makes zero external network requests at runtime.
+
+## Container
+
+```sh
+make docker-build   # docker build -t prview:dev .
+```
+
+The image builds and runs the server, and CI verifies it on every push. Note: live PR
+review shells out to the host's `gh` and `claude` CLIs, which are **not** baked into the
+image — so the container is for build/CI verification and reproducible packaging; for
+actual reviewing, run prview on your host (`uv run prview`).
+
+## License
+
+[MIT](LICENSE).

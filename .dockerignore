@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.maister
+docs
+tests
+*.md
+!README.md
+.DS_Store
+.playwright-mcp

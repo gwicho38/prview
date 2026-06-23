@@ -11,7 +11,10 @@ dependencies = [
 [project.scripts]
 prview = "prview.launcher:main"
 
-[project.optional-dependencies]
+# Dev tools as a uv dependency group: auto-installed by `uv sync` / `uv run`, so
+# `uv run pytest` works without a `--extra dev` flag (an optional-dependencies
+# extra gets pruned on a plain sync).
+[dependency-groups]
 dev = [
     "pytest",
     "httpx",

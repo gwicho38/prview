@@ -352,7 +352,9 @@ a { color: var(--accent); }
 .diff-region .d2h-wrapper { font-size: 13px; font-family: var(--mono); }
 .diff-region .d2h-code-line,
 .diff-region .d2h-code-side-line { line-height: 1.6; color: var(--fg); }
-/* Each side scrolls horizontally so long lines stay reachable (no content cut off). */
+/* Scroll horizontally so long lines stay reachable (no content cut off) — in both
+   line-by-line (.d2h-file-diff) and side-by-side (.d2h-file-side-diff) layouts. */
+.diff-region .d2h-file-diff,
 .diff-region .d2h-file-side-diff { overflow-x: auto; }
 .diff-region .d2h-code-side-linenumber { color: var(--fg-dim); border-color: var(--border); }
 /* Soften the per-line add/del wash so changed *words* stand out, not whole rows. */

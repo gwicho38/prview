@@ -523,7 +523,10 @@ function renderDiff(detail, region) {
     const ui = new window.Diff2HtmlUI(region, text, {
       drawFileList: false,
       matching: "words",        // word-level inline highlights, not whole-line blocks
-      outputFormat: "side-by-side",
+      // Unified, not side-by-side: a mostly-additive diff (e.g. +263/-2) renders
+      // side-by-side with one empty placeholder row per added line, producing a
+      // huge blank column. Line-by-line keeps it compact with no wasted space.
+      outputFormat: "line-by-line",
       colorScheme: "dark",      // GitHub-dark palette (matches app theme) — readable contrast
       highlight: false,         // vendored ui-base bundle has no highlight.js; would throw
     });

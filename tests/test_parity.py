@@ -1,7 +1,7 @@
 """Group 7 — strategic parity / gap-filling tests.
 
-Source of truth: /Users/lefv/.mcli/workflows/workflows/pr-review.py (the mcli
-`pr-review` CLI). These tests assert prview reproduces the CLI's behavior by
+Source of truth: tests/fixtures/pr_review_cli.py (a pinned, vendored snapshot of
+the mcli `pr-review` CLI). These tests assert prview reproduces the CLI's behavior by
 extracting the EXPECTED strings/structures directly from the CLI source (via
 AST), never from prview's own code — so a drift in either side is caught and
 the assertion can never be circular.
@@ -9,6 +9,7 @@ the assertion can never be circular.
 Scope: only gaps NOT already covered by G1-G6. Capped at <=10 tests.
 """
 import ast
+import os
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,18 @@ from prview.core import FileDiff, PRInfo
 from fastapi.testclient import TestClient
 
 
-_SOURCE_PATH = Path.home() / ".mcli" / "workflows" / "workflows" / "pr-review.py"
+# Parity is asserted against a pinned, vendored snapshot of the original mcli
+# `pr-review` CLI (tests/fixtures/pr_review_cli.py). Vendoring decouples the
+# suite from any mcli installation, so parity runs everywhere — locally and in
+# CI — and the snapshot is the explicit, reviewable baseline these tests guard
+# against drift from. Override with PRVIEW_PARITY_SOURCE to diff against a live
+# CLI copy when refreshing the snapshot.
+_DEFAULT_SOURCE = Path(__file__).parent / "fixtures" / "pr_review_cli.py"
+_SOURCE_PATH = Path(os.environ.get("PRVIEW_PARITY_SOURCE", _DEFAULT_SOURCE))
+if not _SOURCE_PATH.exists():
+    pytest.skip(
+        f"parity source not found at {_SOURCE_PATH}", allow_module_level=True
+    )
 _SOURCE_TREE = ast.parse(_SOURCE_PATH.read_text())
 
 

@@ -97,7 +97,6 @@ That's it. prview will:
 
 ⚠️ **Note:** There is no `./prview` script to run directly — the folder named `prview` holds the app code itself. Always start it with `uv run prview` or `python -m prview`.
 
-![The prview landing screen](screenshots/01-landing.png)
 
 ---
 
@@ -108,7 +107,6 @@ On the landing screen, type the PR you want to review into the **Load a Pull Req
 - A short reference like `owner/repo#123`
 - A full GitHub PR URL like `https://github.com/owner/repo/pull/123`
 
-![Landing screen with a PR reference typed in](screenshots/02-landing-ref-filled.png)
 
 Then click **Load PR** (or just press **Enter**).
 
@@ -126,11 +124,9 @@ This is where you'll spend most of your time. The screen is split into three are
 - **Left sidebar (file list):** every changed file, sorted with the biggest changes first. Each row shows the filename and its added/removed line counts. A small marker shows which file you're currently on, and badges appear for files you've viewed (`✓`) or flagged (`⚑`). A progress indicator at the top shows how many files you've viewed.
 - **Main area (file detail):** the AI panel at the top, the side-by-side diff below it, and an action bar at the bottom.
 
-![The review workspace: PR summary, file list, and side-by-side diff](screenshots/03-review-loaded.png)
 
 The diff is shown **side by side** — the old version on the left, the new version on the right — so additions and removals are easy to spot.
 
-![A file's changes shown side by side](screenshots/05-diff-sidebyside.png)
 
 To move between files, click a file in the sidebar, or use the keyboard: **`j`** for the next file and **`k`** (or **`b`**) for the previous one.
 
@@ -146,7 +142,6 @@ The AI panel sits at the top of the main area and helps you understand each file
 
 Because the AI can take a little while (occasionally up to a few minutes), the panel shows a loading state with a timer and a **Cancel** button while it works — so you're never left guessing.
 
-![The AI panel working on an Explain request](screenshots/04-ai-explain-loading.png)
 
 ✅ **What you should see:** a spinner and elapsed timer while the AI thinks, then the answer text appears in the panel.
 
@@ -174,7 +169,6 @@ Flagging is a private, local-only note to yourself: "come back to this one." It 
 2. Optionally type a note explaining why you flagged it.
 3. Click **Flag ⚑** to save.
 
-![The flag dialog with an optional note](screenshots/06-flag-modal.png)
 
 The file gets a `⚑` badge in the sidebar. If you open the flag dialog again on an already-flagged file, you'll see your note and an option to **Unflag** it.
 
@@ -190,7 +184,6 @@ To leave a comment about the file you're currently viewing:
 2. Type your comment in the box.
 3. Click **Post comment**.
 
-![The comment dialog for the current file](screenshots/08-comment-modal.png)
 
 Your comment is posted to the PR on GitHub, with the filename included so others know which file you're referring to.
 
@@ -202,7 +195,6 @@ Your comment is posted to the PR on GitHub, with the filename included so others
 
 When you're ready to finish, click **Submit** in the top bar (or press **`s`**). This opens the submit screen.
 
-![The submit review screen with counts, flagged files, and decision options](screenshots/09-submit-review.png)
 
 Here you'll see:
 
@@ -223,13 +215,11 @@ You can close the browser tab at any time. prview saves your progress — viewed
 
 The next time you start prview, the landing screen lists any in-progress reviews under **Resume in-progress reviews**. Each row shows the PR reference and a quick status like `0 viewed · 1 flagged`.
 
-![The landing screen showing a resumable review](screenshots/10-landing-resume-row.png)
 
 Click the row to jump straight back into that review, exactly where you left off.
 
 💡 **Tip:** The auto-summary will re-run for the file you reopen. If the AI is unavailable at that moment, you'll simply see the error-with-Retry state — your review progress itself is untouched.
 
-![A resumed review showing the AI panel's error-and-retry state](screenshots/11-resumed-review-ai-error.png)
 
 ---
 

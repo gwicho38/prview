@@ -4,7 +4,6 @@
 
 A portable, local-server web app for reviewing GitHub pull requests file-by-file in your browser, with AI assistance. It ports the logic of the `mcli` `pr-review` CLI workflow to a graphical UI while reusing your existing `gh` and `claude` CLIs — no API keys, no tokens to manage.
 
-![Review workspace](docs/screenshots/03-review-loaded.png)
 
 See the full [user guide](docs/user-guide.md).
 

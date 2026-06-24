@@ -279,7 +279,10 @@ def test_ensure_serve_is_singleton_tears_down_other_repo(monkeypatch):
     _reset_serves(monkeypatch)
     ports = iter([3001, 3002])
     monkeypatch.setattr("prview.launcher.pick_free_port", lambda: next(ports))
-    monkeypatch.setattr(rw.subprocess, "Popen", lambda argv, **kw: _FakeProc(pid=1))
+    # Default _FakeProc pid is non-existent → _terminate_proc's os.getpgid raises
+    # and falls back to the fake's terminate(); never signals a real process
+    # group (a low pid like 1 would killpg the CI runner's group).
+    monkeypatch.setattr(rw.subprocess, "Popen", lambda argv, **kw: _FakeProc())
 
     first = rw.ensure_serve("octo", "hello", "/code/hello")
     second = rw.ensure_serve("octo", "widgets", "/code/widgets")

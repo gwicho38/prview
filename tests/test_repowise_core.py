@@ -254,6 +254,34 @@ def test_ensure_serve_reused_across_prs_no_second_popen(monkeypatch):
     assert rw.get_serve("octo", "hello") is first
 
 
+def test_ensure_serve_argv_matches_live_cli_and_runs_in_worktree(monkeypatch):
+    """`repowise serve` (0.23) takes no PATH and no --yes/--no-workspace; it
+    resolves the repo from cwd. Pin the argv + cwd so the live-CLI mismatch
+    that exited serve before the dashboard came up cannot regress."""
+    _reset_serves(monkeypatch)
+    ports = iter([7337, 47821])
+    monkeypatch.setattr("prview.launcher.pick_free_port", lambda: next(ports))
+
+    captured = {}
+
+    def fake_popen(argv, **kw):
+        captured["argv"] = argv
+        captured["cwd"] = kw.get("cwd")
+        return _FakeProc()
+
+    monkeypatch.setattr(rw.subprocess, "Popen", fake_popen)
+    rw.ensure_serve("octo", "hello", "/wt/hello-pr-9")
+
+    assert captured["argv"] == [
+        "repowise", "serve",
+        "--host", "127.0.0.1", "--port", "7337", "--ui-port", "47821",
+    ]
+    assert "--yes" not in captured["argv"]
+    assert "--no-workspace" not in captured["argv"]
+    assert "/wt/hello-pr-9" not in captured["argv"]   # no path positional
+    assert captured["cwd"] == "/wt/hello-pr-9"         # serve reads .repowise from here
+
+
 def test_ensure_serve_respawns_when_child_died(monkeypatch):
     """If the tracked child has exited (poll() != None), a fresh serve starts —
     reuse is gated on the process still being alive, not merely registered."""

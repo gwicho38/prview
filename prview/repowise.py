@@ -421,20 +421,32 @@ def _terminate_proc(proc: "subprocess.Popen") -> None:
             pass
 
 
-def _serve_argv(repo_path: str, api_port: int, ui_port: int) -> list[str]:
-    # Fixed argv; repo_path is a discrete element. Two servers: API on --port,
-    # Next.js Web UI on --ui-port. The dashboard we embed is the UI port.
-    # --host 127.0.0.1 keeps both bound to loopback. DOCUMENTED EXPOSURE: the
+def _serve_env() -> dict:
+    # serve prompts interactively to pick a chat/search embedder unless one is
+    # configured; under a non-TTY Popen that prompt aborts and serve exits
+    # before the dashboard comes up. Pre-seed REPOWISE_EMBEDDER so _setup_embedder
+    # returns early — default to `mock` (needs no API key; we only embed the
+    # wiki dashboard, not chat). Honor a real embedder if the user set one.
+    env = dict(os.environ)
+    env.setdefault("REPOWISE_EMBEDDER", "mock")
+    return env
+
+
+def _serve_argv(api_port: int, ui_port: int) -> list[str]:
+    # `repowise serve` (0.23) takes NO path argument and has no --yes /
+    # --no-workspace options — it resolves the repo from the cwd's
+    # .repowise/wiki.db, so ensure_serve runs it with cwd=<worktree>. Two
+    # servers: API on --port, Next.js Web UI on --ui-port (the dashboard we
+    # embed). --host 127.0.0.1 keeps both on loopback. DOCUMENTED EXPOSURE: the
     # embedded iframe targets this different-origin loopback server, which is
     # NOT behind prview's session-token gate (SecurityMiddleware only guards
     # the prview app). It is reachable by any local process; acceptable for a
     # localhost dev tool, but it is not token-protected like prview's own API.
     return [
-        "repowise", "serve", repo_path,
+        "repowise", "serve",
         "--host", "127.0.0.1",
         "--port", str(api_port),
         "--ui-port", str(ui_port),
-        "--yes", "--no-workspace",
     ]
 
 
@@ -481,7 +493,9 @@ def ensure_serve(owner: str, repo: str, repo_path: str) -> ServeEntry:
     try:
         log_fh = open(logfile, "w")
         proc = subprocess.Popen(
-            _serve_argv(repo_path, api_port, ui_port),
+            _serve_argv(api_port, ui_port),
+            cwd=repo_path,  # serve resolves .repowise/wiki.db from cwd (the worktree)
+            env=_serve_env(),
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             text=True,

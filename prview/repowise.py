@@ -11,6 +11,7 @@ below. All argv is FIXED; client-supplied paths are discrete argv elements and
 are NEVER shell-interpolated (mirrors gh.py / jobs.py). No side effects at
 import.
 """
+import json
 import os
 import re
 import signal
@@ -548,6 +549,62 @@ def probe_frameability(entry: ServeEntry, timeout_s: float = 30.0) -> bool | Non
         except (urllib.error.URLError, OSError):
             time.sleep(0.5)
     return entry.frameable  # still None — caller treats as unknown
+
+
+# ===========================================================================
+# Diff-mode blast radius — query the repowise API (loopback, no key) for the
+# associations of the PR's changed files: direct risk, transitively-affected
+# (1-hop+) files, co-change partners, and recommended reviewers.
+# ===========================================================================
+
+def _api_request(path: str, payload: dict | None = None, timeout_s: float = 30.0) -> dict:
+    """GET/POST JSON against the loopback repowise API (verify_api_key is a
+    no-op on 127.0.0.1, so no token needed). POST when payload is given."""
+    url = f"http://127.0.0.1:{_API_PORT}{path}"
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        url, data=data, method="POST" if data else "GET",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        raise RepowiseError(
+            f"repowise API {exc.code} for {path}",
+            hint="re-prepare the Repowise tab, then retry",
+        )
+    except (urllib.error.URLError, OSError) as exc:
+        raise RepowiseError(
+            f"repowise API unreachable: {exc}",
+            hint="the repowise serve isn't up — open the Repowise tab to prepare first",
+        )
+
+
+def blast_radius(owner: str, repo: str, changed_files: list[str], max_depth: int = 3) -> dict:
+    """Compute the PR's blast radius from the live repowise index.
+
+    Resolves the served repo by its worktree path (the /api/repos list can hold
+    other repos from earlier prepares) and POSTs the changed files.
+    """
+    serve = get_serve(owner, repo)
+    if serve is None or serve._proc is None or serve._proc.poll() is not None:
+        raise RepowiseError(
+            "repowise serve is not running",
+            hint="open the Repowise tab to prepare this PR first",
+        )
+    repos = _api_request("/api/repos")
+    repo_id = next(
+        (r["id"] for r in repos if r.get("local_path") == serve.repo_path),
+        repos[0]["id"] if repos else None,
+    )
+    if not repo_id:
+        raise RepowiseError("repowise has not indexed this repo yet",
+                            hint="re-prepare the Repowise tab")
+    return _api_request(
+        f"/api/repos/{repo_id}/blast-radius",
+        {"changed_files": changed_files, "max_depth": max_depth},
+    )
 
 
 def stop_serve(owner: str, repo: str) -> bool:

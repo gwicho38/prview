@@ -301,3 +301,43 @@ class PrepareSnapshot(BaseModel):
     error_step: str | None = None
     error_hint: str | None = None
     stderr_tail: str | None = None
+
+
+# --- Diff-mode blast radius (associations among the PR's changed files) ------
+
+class BlastRadiusRequest(PRTarget):
+    changed_files: list[str]
+    max_depth: int = Field(default=3, ge=1, le=10)
+
+
+class DirectRisk(BaseModel):
+    path: str
+    risk_score: float = 0.0
+    temporal_hotspot: float = 0.0
+    centrality: float = 0.0
+
+
+class TransitiveAffected(BaseModel):
+    path: str
+    depth: int
+
+
+class CochangeWarning(BaseModel):
+    changed: str
+    missing_partner: str
+    score: float = 0.0
+
+
+class ReviewerSuggestion(BaseModel):
+    email: str
+    files: int = 0
+    ownership_pct: float = 0.0
+
+
+class BlastRadiusModel(BaseModel):
+    direct_risks: list[DirectRisk] = []
+    transitive_affected: list[TransitiveAffected] = []
+    cochange_warnings: list[CochangeWarning] = []
+    recommended_reviewers: list[ReviewerSuggestion] = []
+    test_gaps: list[str] = []
+    overall_risk_score: float = 0.0

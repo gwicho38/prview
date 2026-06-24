@@ -408,7 +408,8 @@ def test_prepare_pr_worktree_fetches_then_adds_isolated_worktree(tmp_path, monke
     assert rev == "abc1234"
     # no dirty-guard: nothing ran `git status`
     assert not any("status" in c for c in calls)
-    assert calls[0] == ["git", "-C", "/code/hello", "fetch", "origin", "pull/42/head:prview/pr-42"]
+    # `+` forces the managed ref to update even after a force-push (non-ff).
+    assert calls[0] == ["git", "-C", "/code/hello", "fetch", "origin", "+pull/42/head:prview/pr-42"]
     assert ["git", "-C", "/code/hello", "worktree", "remove", "--force", expected_wt] in calls
     assert ["git", "-C", "/code/hello", "worktree", "add", "--force", "--detach", expected_wt, "prview/pr-42"] in calls
     # registered for teardown

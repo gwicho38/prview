@@ -233,7 +233,7 @@ def test_ensure_serve_reused_across_prs_no_second_popen(monkeypatch):
     """A second prepare for the same repo must reuse the live serve child — one
     Popen total, one registry entry, same ports — regardless of PR number."""
     _reset_serves(monkeypatch)
-    ports = iter([7337, 47821, 9999, 9998])
+    ports = iter([47821, 9999, 9998])
     monkeypatch.setattr("prview.launcher.pick_free_port", lambda: next(ports))
 
     spawned = []
@@ -254,13 +254,48 @@ def test_ensure_serve_reused_across_prs_no_second_popen(monkeypatch):
     assert rw.get_serve("octo", "hello") is first
 
 
+def test_serve_env_picks_real_embedder_then_falls_back_to_mock(monkeypatch):
+    """Non-interactive serve: prefer an embedder matching an available provider
+    key (chat/search work); fall back to mock when no key is present; never
+    override an explicit REPOWISE_EMBEDDER."""
+    for k in ("REPOWISE_EMBEDDER", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+              "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    assert rw._serve_env()["REPOWISE_EMBEDDER"] == "mock"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    assert rw._serve_env()["REPOWISE_EMBEDDER"] == "openai"
+
+    monkeypatch.setenv("GEMINI_API_KEY", "g-x")  # gemini takes precedence
+    assert rw._serve_env()["REPOWISE_EMBEDDER"] == "gemini"
+
+    monkeypatch.setenv("REPOWISE_EMBEDDER", "ollama")  # explicit wins
+    assert rw._serve_env()["REPOWISE_EMBEDDER"] == "ollama"
+
+
+def test_ensure_serve_is_singleton_tears_down_other_repo(monkeypatch):
+    """Only one serve can hold the fixed API port 7337, so starting a serve for
+    a second repo must terminate the first repo's serve (no two live serves)."""
+    _reset_serves(monkeypatch)
+    ports = iter([3001, 3002])
+    monkeypatch.setattr("prview.launcher.pick_free_port", lambda: next(ports))
+    monkeypatch.setattr(rw.subprocess, "Popen", lambda argv, **kw: _FakeProc(pid=1))
+
+    first = rw.ensure_serve("octo", "hello", "/code/hello")
+    second = rw.ensure_serve("octo", "widgets", "/code/widgets")
+
+    assert first._proc.terminated is True            # freed 7337 for the new serve
+    assert rw.get_serve("octo", "hello") is None      # only the current serve remains
+    assert rw.get_serve("octo", "widgets") is second
+    assert second.api_port == 7337
+
+
 def test_ensure_serve_argv_matches_live_cli_and_runs_in_worktree(monkeypatch):
     """`repowise serve` (0.23) takes no PATH and no --yes/--no-workspace; it
     resolves the repo from cwd. Pin the argv + cwd so the live-CLI mismatch
     that exited serve before the dashboard came up cannot regress."""
     _reset_serves(monkeypatch)
-    ports = iter([7337, 47821])
-    monkeypatch.setattr("prview.launcher.pick_free_port", lambda: next(ports))
+    monkeypatch.setattr("prview.launcher.pick_free_port", lambda: 47821)  # ui port only
 
     captured = {}
 
@@ -272,6 +307,8 @@ def test_ensure_serve_argv_matches_live_cli_and_runs_in_worktree(monkeypatch):
     monkeypatch.setattr(rw.subprocess, "Popen", fake_popen)
     rw.ensure_serve("octo", "hello", "/wt/hello-pr-9")
 
+    # API port is fixed at 7337 (the UI's baked proxy target); only the UI port
+    # is dynamic.
     assert captured["argv"] == [
         "repowise", "serve",
         "--host", "127.0.0.1", "--port", "7337", "--ui-port", "47821",

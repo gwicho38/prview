@@ -425,27 +425,47 @@ def _serve_env() -> dict:
     # serve prompts interactively to pick a chat/search embedder unless one is
     # configured; under a non-TTY Popen that prompt aborts and serve exits
     # before the dashboard comes up. Pre-seed REPOWISE_EMBEDDER so _setup_embedder
-    # returns early — default to `mock` (needs no API key; we only embed the
-    # wiki dashboard, not chat). Honor a real embedder if the user set one.
+    # returns early. Prefer a REAL embedder matching an available provider key
+    # (so chat/search work), falling back to `mock` (no key, dashboard-only).
+    # An explicit REPOWISE_EMBEDDER always wins.
     env = dict(os.environ)
-    env.setdefault("REPOWISE_EMBEDDER", "mock")
+    if not env.get("REPOWISE_EMBEDDER"):
+        if env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY"):
+            env["REPOWISE_EMBEDDER"] = "gemini"
+        elif env.get("OPENAI_API_KEY"):
+            env["REPOWISE_EMBEDDER"] = "openai"
+        elif env.get("OPENROUTER_API_KEY"):
+            env["REPOWISE_EMBEDDER"] = "openrouter"
+        else:
+            env["REPOWISE_EMBEDDER"] = "mock"
     return env
 
 
-def _serve_argv(api_port: int, ui_port: int) -> list[str]:
+# The bundled Next.js UI bakes its API proxy target at BUILD time:
+# next.config rewrites send /api/* -> http://localhost:7337 and ignore
+# REPOWISE_API_URL. So the embedded dashboard only works when the API server
+# listens on 7337 — a random --port leaves every panel proxying to a dead
+# 7337 (ECONNREFUSED → 500). The API port is therefore fixed; only the UI port
+# (which the UI honours via PORT) is dynamic. One consequence: at most ONE
+# repowise serve can run at a time (they would collide on 7337), so ensure_serve
+# tears down any other live serve before starting a new one.
+_API_PORT = 7337
+
+
+def _serve_argv(ui_port: int) -> list[str]:
     # `repowise serve` (0.23) takes NO path argument and has no --yes /
     # --no-workspace options — it resolves the repo from the cwd's
     # .repowise/wiki.db, so ensure_serve runs it with cwd=<worktree>. Two
-    # servers: API on --port, Next.js Web UI on --ui-port (the dashboard we
-    # embed). --host 127.0.0.1 keeps both on loopback. DOCUMENTED EXPOSURE: the
-    # embedded iframe targets this different-origin loopback server, which is
-    # NOT behind prview's session-token gate (SecurityMiddleware only guards
-    # the prview app). It is reachable by any local process; acceptable for a
-    # localhost dev tool, but it is not token-protected like prview's own API.
+    # servers: API on --port 7337 (see _API_PORT), Next.js Web UI on --ui-port
+    # (the dashboard we embed). --host 127.0.0.1 keeps both on loopback.
+    # DOCUMENTED EXPOSURE: the embedded iframe targets this different-origin
+    # loopback server, which is NOT behind prview's session-token gate
+    # (SecurityMiddleware only guards the prview app). It is reachable by any
+    # local process; acceptable for a localhost dev tool.
     return [
         "repowise", "serve",
         "--host", "127.0.0.1",
-        "--port", str(api_port),
+        "--port", str(_API_PORT),
         "--ui-port", str(ui_port),
     ]
 
@@ -471,19 +491,14 @@ def ensure_serve(owner: str, repo: str, repo_path: str) -> ServeEntry:
     with _serves_lock:
         existing = _serves.get(key)
         if existing is not None and existing._proc is not None \
-                and existing._proc.poll() is None:
-            if existing.repo_path == repo_path:
-                return existing
-            # A live serve is bound to a different path (a prior PR's worktree or
-            # an in-place checkout) — tear it down so we serve the current PR.
-            _serves.pop(key, None)
-            stale = existing
-        else:
-            stale = None
-    if stale is not None:
-        _terminate_proc(stale._proc)
+                and existing._proc.poll() is None \
+                and existing.repo_path == repo_path:
+            return existing
+    # No exact reuse → we need port 7337 free. Only one serve can hold it, so
+    # tear down EVERY live serve (this repo's stale one and any other repo's)
+    # before starting fresh. Worktrees are left intact (serves only).
+    _stop_all_serves()
 
-    api_port = pick_free_port()
     ui_port = pick_free_port()
     # Stream the long-lived child's output to a logfile, NOT an undrained PIPE:
     # a chatty server would fill the OS pipe buffer and deadlock. The logfile's
@@ -493,7 +508,7 @@ def ensure_serve(owner: str, repo: str, repo_path: str) -> ServeEntry:
     try:
         log_fh = open(logfile, "w")
         proc = subprocess.Popen(
-            _serve_argv(api_port, ui_port),
+            _serve_argv(ui_port),
             cwd=repo_path,  # serve resolves .repowise/wiki.db from cwd (the worktree)
             env=_serve_env(),
             stdout=log_fh,
@@ -506,7 +521,7 @@ def ensure_serve(owner: str, repo: str, repo_path: str) -> ServeEntry:
 
     entry = ServeEntry(
         pid=proc.pid,
-        api_port=api_port,
+        api_port=_API_PORT,
         ui_port=ui_port,
         url=f"http://127.0.0.1:{ui_port}/",
         started_at=time.time(),
@@ -546,14 +561,20 @@ def stop_serve(owner: str, repo: str) -> bool:
     return True
 
 
-def stop_all():
-    """Terminate all serve children, prune worktrees, clear registries (shutdown)."""
+def _stop_all_serves():
+    """Terminate every serve child and clear the registry (serves only — leaves
+    worktrees intact). Used to free port 7337 before a new serve starts."""
     with _serves_lock:
         entries = list(_serves.values())
         _serves.clear()
     for entry in entries:
         if entry._proc is not None:
             _terminate_proc(entry._proc)
+
+
+def stop_all():
+    """Terminate all serve children, prune worktrees, clear registries (shutdown)."""
+    _stop_all_serves()
     remove_all_worktrees()
 
 

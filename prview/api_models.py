@@ -351,3 +351,19 @@ class CoverageIngestModel(BaseModel):
     ok: bool
     files: int = 0
     path: str = ""
+
+
+class DocgenRequest(PRTarget):
+    model: str | None = None  # ollama model; blank → first installed
+
+
+class OllamaModelsModel(BaseModel):
+    models: list[str] = []
+
+
+class DocgenSnapshot(BaseModel):
+    status: str  # running | done | error
+    elapsed: float = 0.0
+    model: str = ""
+    error: str | None = None
+    log_tail: str | None = None

@@ -634,6 +634,7 @@ a { color: var(--accent); }
 .rw-diff-row { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
 .rw-diff-path { flex: 1 1 auto; font-family: var(--mono); font-size: 13px; color: var(--fg); word-break: break-all; }
 .rw-diff-tag { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--fg-muted); }
+.rw-docgen-status { margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--fg-muted); white-space: pre-wrap; }
 
 /* component:repowise-link-fallback */
 .rw-fallback {

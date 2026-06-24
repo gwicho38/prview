@@ -524,3 +524,26 @@ def test_coverage_route_returns_model(client, monkeypatch):
     assert body["ok"] is True and body["files"] == 42
     assert body["path"].endswith("coverage.lcov")
     assert captured["path"] is None  # blank → server-side auto-detect
+
+
+def test_ollama_models_route(client, monkeypatch):
+    monkeypatch.setattr(repowise, "list_ollama_models", lambda: ["qwen2.5:3b", "gemma4:latest"])
+    resp = client.get("/repowise/ollama-models")
+    assert resp.status_code == 200
+    assert resp.json()["models"] == ["qwen2.5:3b", "gemma4:latest"]
+
+
+def test_docs_generate_start_and_status(client, monkeypatch):
+    monkeypatch.setattr(repowise, "start_docgen", lambda o, r, m: "docgen-1")
+    resp = client.post("/repowise/docs/generate",
+                       json={"owner": "octo", "repo": "hello", "number": 7, "model": "gemma4:latest"})
+    assert resp.status_code == 200 and resp.json()["job_id"] == "docgen-1"
+
+    monkeypatch.setattr(repowise, "get_docgen",
+                        lambda jid: {"status": "running", "elapsed": 3.0, "model": "gemma4:latest",
+                                     "error": None, "log_tail": None})
+    s = client.get("/repowise/docs/generate/docgen-1")
+    assert s.status_code == 200 and s.json()["model"] == "gemma4:latest"
+
+    monkeypatch.setattr(repowise, "get_docgen", lambda jid: None)
+    assert client.get("/repowise/docs/generate/nope").status_code == 404

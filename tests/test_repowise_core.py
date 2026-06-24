@@ -592,6 +592,19 @@ def test_start_docgen_errors_when_serve_down(monkeypatch):
         assert "not running" in exc.message
 
 
+def test_docgen_progress_strips_rich_and_takes_last_informative_line(tmp_path):
+    log = tmp_path / "d.log"
+    log.write_text(
+        "Phase 1 of 4\n"
+        "│ Generated 3 pages │\n"
+        "some unrelated chatter\n"
+        "\x1b[32mGenerating wiki page Codebase Map\x1b[0m\n"
+    )
+    assert rw._docgen_progress(str(log)) == "Generating wiki page Codebase Map"
+    assert rw._docgen_progress("") is None
+    assert rw._docgen_progress(str(tmp_path / "missing.log")) is None
+
+
 def test_ensure_indexed_skips_when_wiki_db_present(tmp_path, monkeypatch):
     """wiki.db present → skipped True, NO init subprocess invoked at all."""
     repo = tmp_path / "clone"

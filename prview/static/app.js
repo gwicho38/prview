@@ -1971,7 +1971,9 @@ async function pollDocgen(jobId, status) {
     catch (e) { status.textContent = e.message; return; }
     const secs = Math.round((Date.now() - t0) / 1000);
     if (snap.status === "running") {
-      status.textContent = `Generating with ${snap.model}… ${secs}s (local, please wait)`;
+      const mins = secs >= 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;
+      const line = snap.progress ? `\n${snap.progress}` : "";
+      status.textContent = `Generating with ${snap.model}… ${mins} (local — bigger models are slower)${line}`;
       await new Promise((r) => setTimeout(r, 2000));
       continue;
     }

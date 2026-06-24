@@ -45,6 +45,8 @@ from prview.api_models import (
     PrepareRequest,
     BlastRadiusModel,
     BlastRadiusRequest,
+    CoverageIngestModel,
+    CoverageIngestRequest,
     PrepareSnapshot,
     PRInfoModel,
     PRRefRequest,
@@ -374,6 +376,13 @@ def repowise_blast_radius(req: BlastRadiusRequest) -> BlastRadiusModel:
     # Diff mode: associations among the PR's changed files from the live index.
     data = repowise.blast_radius(req.owner, req.repo, req.changed_files, req.max_depth)
     return BlastRadiusModel(**data)
+
+
+@app.post("/repowise/coverage", response_model=CoverageIngestModel)
+def repowise_coverage(req: CoverageIngestRequest) -> CoverageIngestModel:
+    # Ingest a coverage report so the dashboard's coverage panels populate.
+    data = repowise.ingest_coverage(req.owner, req.repo, req.path)
+    return CoverageIngestModel(**data)
 
 
 # --- Static assets ------------------------------------------------------------

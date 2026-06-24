@@ -1740,6 +1740,17 @@ function renderRwEmbed(rw) {
 
   const actions = document.createElement("span");
   actions.className = "rw-bar-actions";
+  // Complete (embedded dashboard) vs Diff associations (prview-native blast radius).
+  if (!rw.mode) rw.mode = "complete";
+  const seg = document.createElement("span");
+  seg.className = "rw-mode-seg";
+  for (const [mode, label] of [["complete", "Complete"], ["diff", "Diff associations"]]) {
+    const b = document.createElement("button");
+    b.className = "rw-mode-btn" + (rw.mode === mode ? " is-active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => { rw.mode = mode; renderRwEmbed(rw); });
+    seg.appendChild(b);
+  }
   const restart = document.createElement("button");
   restart.className = "btn btn-ghost";
   restart.textContent = "↻ Restart";
@@ -1748,23 +1759,93 @@ function renderRwEmbed(rw) {
   open.className = "btn btn-ghost";
   open.textContent = "Open ↗";
   open.addEventListener("click", () => window.open(url, "_blank", "noopener"));
-  actions.append(restart, open);
+  actions.append(seg, restart, open);
   bar.append(ctx, actions);
 
   const frame = document.createElement("div");
   frame.className = "rw-embed-frame";
-  const iframe = document.createElement("iframe");
-  iframe.src = url;
-  iframe.title = `repowise dashboard for ${refString()}`;
-  // The embedded dashboard is a DIFFERENT-origin localhost server NOT behind prview's
-  // token gate. Sandbox it so it can't navigate the top frame or reach prview's origin;
-  // allow-scripts+allow-same-origin so repowise's own SPA + same-origin XHR still work.
-  iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-popups";
-  iframe.referrerPolicy = "no-referrer";
-  frame.appendChild(iframe);
+  if (rw.mode === "diff") {
+    renderRwDiffPanel(frame, rw);
+  } else {
+    const iframe = document.createElement("iframe");
+    iframe.src = url;
+    iframe.title = `repowise dashboard for ${refString()}`;
+    // The embedded dashboard is a DIFFERENT-origin localhost server NOT behind prview's
+    // token gate. Sandbox it so it can't navigate the top frame or reach prview's origin;
+    // allow-scripts+allow-same-origin so repowise's own SPA + same-origin XHR still work.
+    iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-popups";
+    iframe.referrerPolicy = "no-referrer";
+    frame.appendChild(iframe);
+  }
 
   wrap.append(bar, frame);
   el.appendChild(wrap);
+}
+
+// Diff mode: prview-native panel of the changed files' associations — direct
+// risk, transitively-affected (1-hop+) files, co-change partners, reviewers.
+async function renderRwDiffPanel(frame, rw) {
+  frame.classList.add("rw-diff-panel");
+  if (rw.blast) { paintRwDiff(frame, rw.blast); return; }
+  frame.innerHTML = '<div class="rw-diff-loading"><span class="spinner"></span> Analyzing diff associations…</div>';
+  const { owner, repo, number } = prKey();
+  const changed_files = State.files.map((f) => f.filename);
+  try {
+    rw.blast = await api("POST", "/repowise/blast-radius", { owner, repo, number, changed_files });
+    paintRwDiff(frame, rw.blast);
+  } catch (e) {
+    frame.innerHTML = "";
+    const err = document.createElement("div");
+    err.className = "rw-diff-error";
+    err.textContent = (e && e.message) || "Could not load diff associations.";
+    frame.appendChild(err);
+  }
+}
+
+function paintRwDiff(frame, b) {
+  frame.innerHTML = "";
+  const risk = Math.round((b.overall_risk_score || 0) * 10) / 10;
+  const head = document.createElement("div");
+  head.className = "rw-diff-head";
+  head.textContent = `Diff blast radius · risk ${risk}/10 · ${b.direct_risks.length} changed files`;
+  frame.appendChild(head);
+
+  const section = (title, rows, render) => {
+    const s = document.createElement("div");
+    s.className = "rw-diff-section";
+    const h = document.createElement("div");
+    h.className = "rw-diff-title";
+    h.textContent = `${title}  (${rows.length})`;
+    s.appendChild(h);
+    if (!rows.length) {
+      const e = document.createElement("div");
+      e.className = "rw-diff-empty"; e.textContent = "none";
+      s.appendChild(e);
+    } else {
+      for (const r of rows) s.appendChild(render(r));
+    }
+    frame.appendChild(s);
+  };
+
+  const row = (text, tag) => {
+    const d = document.createElement("div");
+    d.className = "rw-diff-row";
+    const t = document.createElement("span"); t.className = "rw-diff-path"; t.textContent = text;
+    d.appendChild(t);
+    if (tag) { const g = document.createElement("span"); g.className = "rw-diff-tag"; g.textContent = tag; d.appendChild(g); }
+    return d;
+  };
+
+  section("Changed files by risk",
+    [...b.direct_risks].sort((a, c) => c.risk_score - a.risk_score),
+    (r) => row(r.path, `risk ${Math.round(r.risk_score * 100) / 100}`));
+  section("Transitively affected (not in diff)", b.transitive_affected,
+    (r) => row(r.path, `depth ${r.depth}`));
+  section("Co-change partners missing from this PR", b.cochange_warnings,
+    (r) => row(`${r.changed} → ${r.missing_partner}`, `${Math.round(r.score * 100)}%`));
+  section("Suggested reviewers", b.recommended_reviewers,
+    (r) => row(r.email, `${r.files} files · ${Math.round(r.ownership_pct)}%`));
+  section("Test gaps", b.test_gaps, (p) => row(p));
 }
 
 async function rwRestart() {

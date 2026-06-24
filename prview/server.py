@@ -43,6 +43,8 @@ from prview.api_models import (
     JobStatusResponse,
     OkResponse,
     PrepareRequest,
+    BlastRadiusModel,
+    BlastRadiusRequest,
     PrepareSnapshot,
     PRInfoModel,
     PRRefRequest,
@@ -365,6 +367,13 @@ async def repowise_prepare_cancel(job_id: str) -> OkResponse:
 @app.post("/repowise/stop", response_model=OkResponse)
 def repowise_stop(req: RepoRef) -> OkResponse:
     return OkResponse(ok=repowise.stop_serve(req.owner, req.repo))
+
+
+@app.post("/repowise/blast-radius", response_model=BlastRadiusModel)
+def repowise_blast_radius(req: BlastRadiusRequest) -> BlastRadiusModel:
+    # Diff mode: associations among the PR's changed files from the live index.
+    data = repowise.blast_radius(req.owner, req.repo, req.changed_files, req.max_depth)
+    return BlastRadiusModel(**data)
 
 
 # --- Static assets ------------------------------------------------------------

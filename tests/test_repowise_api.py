@@ -464,3 +464,46 @@ def test_path_unknown_409_then_persist_then_prepare_proceeds(client, monkeypatch
                      json={"owner": "octo", "repo": "hello", "number": 7})
     assert r3.status_code == 200
     assert r3.json()["job_id"] == "job-after-persist"
+
+
+def test_blast_radius_route_returns_model(client, monkeypatch):
+    """The /repowise/blast-radius route shapes repowise's response into the
+    prview model (direct risks, transitive, co-change, reviewers, test gaps)."""
+    captured = {}
+
+    def fake_blast(owner, repo, changed_files, max_depth=3):
+        captured.update(owner=owner, repo=repo, files=changed_files, depth=max_depth)
+        return {
+            "direct_risks": [{"path": "a.py", "risk_score": 1.2, "temporal_hotspot": 0.0, "centrality": 0.5}],
+            "transitive_affected": [{"path": "c.py", "depth": 1}],
+            "cochange_warnings": [{"changed": "a.py", "missing_partner": "d.py", "score": 0.8}],
+            "recommended_reviewers": [{"email": "x@y.z", "files": 3, "ownership_pct": 42.0}],
+            "test_gaps": ["a.py"],
+            "overall_risk_score": 3.4,
+        }
+
+    monkeypatch.setattr(repowise, "blast_radius", fake_blast)
+    resp = client.post("/repowise/blast-radius", json={
+        "owner": "octo", "repo": "hello", "number": 7, "changed_files": ["a.py", "b.py"],
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert captured["files"] == ["a.py", "b.py"] and captured["depth"] == 3
+    assert body["overall_risk_score"] == 3.4
+    assert body["direct_risks"][0]["path"] == "a.py"
+    assert body["transitive_affected"][0]["depth"] == 1
+    assert body["cochange_warnings"][0]["missing_partner"] == "d.py"
+    assert body["recommended_reviewers"][0]["email"] == "x@y.z"
+    assert body["test_gaps"] == ["a.py"]
+
+
+def test_blast_radius_route_surfaces_repowise_error(client, monkeypatch):
+    def boom(owner, repo, changed_files, max_depth=3):
+        raise repowise.RepowiseError("repowise serve is not running", hint="prepare first")
+
+    monkeypatch.setattr(repowise, "blast_radius", boom)
+    resp = client.post("/repowise/blast-radius", json={
+        "owner": "octo", "repo": "hello", "number": 7, "changed_files": ["a.py"],
+    })
+    assert resp.status_code == 400
+    assert "not running" in resp.json()["error"]

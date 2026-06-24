@@ -443,6 +443,45 @@ def test_remove_all_worktrees_prunes_and_clears_registry(monkeypatch):
     assert rw._worktrees == {}
 
 
+def test_blast_radius_resolves_repo_id_by_worktree_then_posts(monkeypatch):
+    """blast_radius matches the served repo by its worktree local_path (the
+    /api/repos list can hold other repos) and POSTs the changed files."""
+    class _Proc:
+        def poll(self): return None
+
+    class _Serve:
+        repo_path = "/wt/hello-pr-9"
+        _proc = _Proc()
+
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _Serve())
+    calls = []
+
+    def fake_api(path, payload=None, timeout_s=30.0):
+        calls.append((path, payload))
+        if path == "/api/repos":
+            return [{"id": "OTHER", "local_path": "/wt/other"},
+                    {"id": "RID", "local_path": "/wt/hello-pr-9"}]
+        return {"direct_risks": [], "transitive_affected": [], "cochange_warnings": [],
+                "recommended_reviewers": [], "test_gaps": [], "overall_risk_score": 0.0}
+
+    monkeypatch.setattr(rw, "_api_request", fake_api)
+    out = rw.blast_radius("octo", "hello", ["a.py", "b.py"], max_depth=2)
+
+    assert calls[0] == ("/api/repos", None)
+    assert calls[1] == ("/api/repos/RID/blast-radius",
+                        {"changed_files": ["a.py", "b.py"], "max_depth": 2})
+    assert "direct_risks" in out
+
+
+def test_blast_radius_errors_when_serve_not_running(monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: None)
+    try:
+        rw.blast_radius("o", "r", ["a.py"])
+        assert False, "expected RepowiseError"
+    except rw.RepowiseError as exc:
+        assert "not running" in exc.message
+
+
 def test_ensure_indexed_skips_when_wiki_db_present(tmp_path, monkeypatch):
     """wiki.db present → skipped True, NO init subprocess invoked at all."""
     repo = tmp_path / "clone"

@@ -10,7 +10,7 @@ deviations:
 """
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -23,7 +23,8 @@ def _state_path(owner: str, repo: str, number: int) -> Path:
 
 def load_review_state(owner: str, repo: str, number: int) -> dict:
     """Load persisted review state for a PR."""
-    defaults = {"viewed": [], "flagged": {}, "comments": 0, "submitted": False}
+    defaults = {"viewed": [], "flagged": {}, "comments": 0,
+                "comment_threads": {}, "submitted": False}
     path = _state_path(owner, repo, number)
     if path.exists():
         try:
@@ -39,16 +40,57 @@ def save_review_state(owner: str, repo: str, number: int, state: dict):
     _state_path(owner, repo, number).write_text(json.dumps(state, indent=2) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Repo-path mapping — ~/.prview/repos.json (FR-9)
+# ---------------------------------------------------------------------------
+# owner/repo → absolute local clone path. Same dir + tolerant read/write idiom
+# as the review-state helpers above; pure I/O, no subprocess.
+
+_REPO_MAP_PATH = Path.home() / ".prview" / "repos.json"
+
+
+def load_repo_map() -> dict:
+    """Load the owner/repo → local-path map, tolerating missing/corrupt files."""
+    if _REPO_MAP_PATH.exists():
+        try:
+            data = json.loads(_REPO_MAP_PATH.read_text())
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_repo_map(repo_map: dict):
+    """Persist the owner/repo → local-path map."""
+    _REPO_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _REPO_MAP_PATH.write_text(json.dumps(repo_map, indent=2) + "\n")
+
+
+def get_repo_path(owner: str, repo: str) -> str | None:
+    """Return the persisted local path for owner/repo, or None if unknown."""
+    return load_repo_map().get(f"{owner}/{repo}")
+
+
+def set_repo_path(owner: str, repo: str, path: str):
+    """Persist (or overwrite) the local path for owner/repo."""
+    repo_map = load_repo_map()
+    repo_map[f"{owner}/{repo}"] = path
+    save_repo_map(repo_map)
+
+
 def apply_saved_state(files: list, state: dict):
-    """Apply saved viewed/flagged state to file list."""
+    """Apply saved viewed/flagged/comment state to file list."""
     viewed_set = set(state.get("viewed", []))
     flagged_map = state.get("flagged", {})
+    comment_threads = state.get("comment_threads", {})
     for fd in files:
         if fd.filename in viewed_set:
             fd.viewed = True
         if fd.filename in flagged_map:
             fd.flagged = True
             fd.flag_note = flagged_map[fd.filename]
+        fd.comments = list(comment_threads.get(fd.filename, []))
 
 
 def collect_state(files: list, comments_posted: int) -> dict:
@@ -91,6 +133,7 @@ class FileDiff:
     flagged: bool = False
     flag_note: str = ""
     viewed: bool = False
+    comments: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

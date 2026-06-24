@@ -22,8 +22,18 @@ def test_load_missing_returns_default(tmp_path, monkeypatch):
         "viewed": [],
         "flagged": {},
         "comments": 0,
+        "comment_threads": {},
         "submitted": False,
     }
+
+
+def test_apply_saved_state_populates_file_comments(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_CACHE_DIR", tmp_path / "state")
+    files = [FileDiff(filename="a.py", diff_text=""), FileDiff(filename="b.py", diff_text="")]
+    state = {"comment_threads": {"a.py": ["first", "second"]}}
+    apply_saved_state(files, state)
+    assert files[0].comments == ["first", "second"]
+    assert files[1].comments == []
 
 
 def test_state_round_trip(tmp_path, monkeypatch):

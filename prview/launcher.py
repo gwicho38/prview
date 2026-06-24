@@ -41,13 +41,21 @@ def schedule_browser_open(url: str, delay: float = _BROWSER_DELAY_S) -> threadin
 
 
 def main() -> None:
+    # Imported lazily: repowise imports pick_free_port from this module, so a
+    # top-level import here would be a cycle. Nothing cleans up the long-lived
+    # `repowise serve` children today — the finally hook below terminates them.
+    import prview.repowise as repowise
+
     port = pick_free_port()
     token = mint_token()
     server.set_session_token(token)
     url = build_launch_url(port, token)
     print(f"prview → {url}", flush=True)
     schedule_browser_open(url)
-    uvicorn.run(server.app, host=HOST, port=port, log_level="warning")
+    try:
+        uvicorn.run(server.app, host=HOST, port=port, log_level="warning")
+    finally:
+        repowise.stop_all()
 
 
 if __name__ == "__main__":

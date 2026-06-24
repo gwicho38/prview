@@ -230,6 +230,32 @@ a { color: var(--accent); }
 
 .drawer-toggle { display: none; }
 
+/* ---- nav-tabs (Review / Repowise) in the pr-summary status row --------- */
+.nav-tabs { display: inline-flex; gap: 2px; align-items: stretch; }
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 13px;
+  border-bottom-width: 2px;
+}
+.nav-tab:first-child { border-radius: 6px 0 0 6px; }
+.nav-tab:last-child { border-radius: 0 6px 6px 0; }
+.nav-tab + .nav-tab { border-left: 0; }
+.nav-tab:hover { color: var(--fg); }
+.nav-tab[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.nav-tab .nav-tab-mark { color: var(--accent); width: 0.9em; display: inline-block; }
+.nav-tabs-hint { margin-left: 4px; align-self: center; }
+
 /* file-list */
 .file-list {
   grid-area: files;
@@ -354,7 +380,10 @@ a { color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---- Diff -------------------------------------------------------------- */
-.diff-region { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+/* position:relative makes this the containing block for diff2html's absolutely
+   positioned line-number gutter, so the gutter scrolls with the code inside
+   .fd-scroll instead of anchoring to the viewport and staying frozen. */
+.diff-region { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; position: relative; }
 /* diff2html dark scheme (enabled in JS) provides the palette. Tune for legibility
    WITHOUT touching the horizontal box: diff2html positions the line number
    absolutely and reserves space for it via the code line's left padding
@@ -385,6 +414,24 @@ a { color: var(--accent); }
 .diff-region .d2h-file-header { display: none; }
 .diff-placeholder { padding: 24px; text-align: center; color: var(--fg-muted); font-family: var(--mono); }
 .diff-loading { padding: 24px; text-align: center; color: var(--fg-muted); }
+
+/* ---- File comments (bubbles in the reviewed file) ---------------------- */
+.fd-comments { display: flex; flex-direction: column; gap: 8px; }
+.fd-comments[hidden] { display: none; }
+.fd-comments-title { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
+.comment-bubble {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 3px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ---- Inline "explain selection" --------------------------------------- */
 .sel-explain-btn {
@@ -502,6 +549,109 @@ a { color: var(--accent); }
 .unviewed-warn[hidden] { display: none; }
 .submit-actions { display: flex; justify-content: flex-end; gap: 12px; }
 
+/* ---- screen:repowise --------------------------------------------------- */
+.repowise-grid {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "summary" "region";
+  height: 100%;
+}
+#pr-summary-repowise { grid-area: summary; }
+.repowise-region {
+  grid-area: region;
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* component:repowise-prepare */
+.rw-prepare {
+  flex: 1 1 auto;
+  overflow: auto;
+  min-height: 0;
+  padding: 24px 28px;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+}
+.rw-prepare-title { font-family: var(--mono); font-size: 14px; color: var(--fg); margin-bottom: 18px; }
+.rw-steps { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.rw-step { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: baseline; font-family: var(--mono); font-size: 13px; }
+.rw-step-glyph { width: 18px; text-align: center; }
+.rw-step-glyph .spinner { vertical-align: -1px; }
+.rw-step-label { color: var(--fg); }
+.rw-step-sub { color: var(--fg-muted); font-size: 12px; margin-top: 2px; }
+.rw-step.is-pending .rw-step-label { color: var(--fg-dim); }
+.rw-step.is-skipped .rw-step-label { color: var(--fg-muted); }
+.rw-prepare-progress { display: flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 12px; color: var(--fg-muted); margin-bottom: 18px; }
+.rw-prepare-foot { display: flex; justify-content: flex-end; }
+
+/* component:repowise-embed */
+.rw-embed { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.rw-embed-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.rw-embed-bar .rw-bar-ctx { color: var(--fg); }
+.rw-embed-bar .rw-bar-mark { color: var(--accent); }
+.rw-embed-bar .rw-bar-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.rw-embed-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px;
+  overflow: hidden;
+}
+.rw-embed-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+/* component:repowise-link-fallback */
+.rw-fallback {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 16px;
+  padding: 32px;
+}
+.rw-fallback-mark { font-size: 18px; color: var(--fg); font-family: var(--mono); }
+.rw-fallback-mark .rw-bar-mark { color: var(--accent); }
+.rw-fallback-text { color: var(--fg-muted); max-width: 460px; line-height: 1.55; }
+.rw-fallback .btn-primary { padding: 10px 22px; font-size: 15px; }
+.rw-url-row { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; color: var(--fg-muted); }
+.rw-url-row .rw-url { color: var(--fg); }
+
+/* component:repowise-error (reuses .ai-error / .ai-body code) */
+.rw-error { flex: 1 1 auto; overflow: auto; min-height: 0; padding: 24px 28px; max-width: 760px; width: 100%; margin: 0 auto; }
+.rw-error .ai-error { margin: 6px 0 4px; }
+.rw-error-hint { color: var(--fg-muted); font-family: var(--mono); font-size: 12px; margin: 0 0 16px 24px; }
+.rw-error-hint code { font-family: var(--mono); background: var(--bg-elev-2); padding: 1px 6px; border-radius: 4px; color: var(--fg); }
+.rw-error-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.rw-stderr {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+}
+
 /* ---- Toast ------------------------------------------------------------- */
 .toast-stack { position: fixed; bottom: 22px; right: 22px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
 .toast {
@@ -540,4 +690,11 @@ a { color: var(--accent); }
   }
   body.drawer-open .file-list { transform: none; }
   .counts-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* pr-summary stacks; nav-tabs wrap below the status text */
+  .pr-summary .ps-status-row { flex-wrap: wrap; gap: 12px; }
+  .pr-summary .ps-status-row .submit-entry { margin-left: 0; }
+  /* The ☰ Files drawer toggle is meaningless on the Repowise tab (no file list) */
+  #pr-summary-repowise .drawer-toggle { display: none; }
+  .rw-embed-frame { margin: 6px; }
 }

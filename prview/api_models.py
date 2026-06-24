@@ -365,5 +365,6 @@ class DocgenSnapshot(BaseModel):
     status: str  # running | done | error
     elapsed: float = 0.0
     model: str = ""
+    progress: str | None = None
     error: str | None = None
     log_tail: str | None = None

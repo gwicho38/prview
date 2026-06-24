@@ -761,6 +761,26 @@ def start_docgen(owner: str, repo: str, model: str | None = None) -> str:
     return job.id
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _docgen_progress(logfile: str) -> str | None:
+    """Last informative line from the generation log (per-page / phase), with
+    rich's ANSI + box-drawing stripped — so the poller shows real progress."""
+    if not logfile:
+        return None
+    try:
+        text = Path(logfile).read_text(errors="replace")
+    except OSError:
+        return None
+    best = None
+    for raw in text.splitlines():
+        ln = _ANSI_RE.sub("", raw).strip(" │─╭╮╰╯├┤┌┐└┘\t")
+        if ln and re.search(r"(Phase \d|Generat|wiki page|Indexing|Embedding|\bpages?\b|\d+%)", ln, re.I):
+            best = ln
+    return best[:140] if best else None
+
+
 def get_docgen(job_id: str) -> dict | None:
     with _docgens_lock:
         job = _docgens.get(job_id)
@@ -770,6 +790,7 @@ def get_docgen(job_id: str) -> dict | None:
         "status": job.status,
         "elapsed": time.time() - job.started_at,
         "model": job.model,
+        "progress": _docgen_progress(job.logfile),
         "error": job.error,
         "log_tail": job.log_tail,
     }

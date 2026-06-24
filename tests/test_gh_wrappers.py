@@ -93,6 +93,38 @@ def test_post_pr_comment_preserves_body_prefix_as_argv_element():
     assert cmd[:3] == ["gh", "pr", "comment"]
 
 
+def test_post_pr_review_comment_anchors_range_via_gh_api():
+    from prview.gh import post_pr_review_comment
+    captured = {}
+
+    def fake_run(cmd, *a, **kw):
+        captured["cmd"] = cmd
+        return _Result(returncode=0)
+
+    with patch("prview.gh.subprocess.run", side_effect=fake_run):
+        ok = post_pr_review_comment("o", "r", 42, "src/app.py", "range nit",
+                                    "sha123", line=5, side="RIGHT", start_line=3)
+    assert ok is True
+    cmd = captured["cmd"]
+    assert cmd[:5] == ["gh", "api", "--method", "POST", "repos/o/r/pulls/42/comments"]
+    # numeric fields use -F (typed); strings use -f; range adds start_line/start_side
+    assert "-F" in cmd and f"line=5" in cmd
+    assert "body=range nit" in cmd and "commit_id=sha123" in cmd and "path=src/app.py" in cmd
+    assert "side=RIGHT" in cmd
+    assert "start_line=3" in cmd and "start_side=RIGHT" in cmd
+
+
+def test_post_pr_review_comment_single_line_omits_range():
+    from prview.gh import post_pr_review_comment
+    captured = {}
+    with patch("prview.gh.subprocess.run",
+               side_effect=lambda cmd, *a, **k: (captured.update(cmd=cmd), _Result(0))[1]):
+        post_pr_review_comment("o", "r", 42, "src/app.py", "nit", "sha", line=9)
+    cmd = captured["cmd"]
+    assert "line=9" in cmd
+    assert not any(str(x).startswith("start_line=") for x in cmd)
+
+
 def test_mark_file_viewed_two_step_success():
     results = iter([
         _Result(returncode=0, stdout="PR_nodeid\n"),  # gh pr view --json id

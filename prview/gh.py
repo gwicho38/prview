@@ -159,3 +159,43 @@ def post_pr_comment(owner: str, repo: str, number: int, path: str, text: str) ->
          "--body", body],
     )
     return result.returncode == 0
+
+
+def pr_head_sha(owner: str, repo: str, number: int) -> str:
+    """Resolve the PR head commit SHA (required to anchor a review comment)."""
+    result = _run(
+        ["gh", "pr", "view", str(number), "--repo", f"{owner}/{repo}",
+         "--json", "headRefOid", "-q", ".headRefOid"],
+    )
+    if result.returncode != 0:
+        raise GhError(
+            f"Failed to resolve PR head: {result.stderr.strip()}",
+            hint=_AUTH_HINT,
+        )
+    return result.stdout.strip()
+
+
+def post_pr_review_comment(
+    owner: str, repo: str, number: int, path: str, text: str, commit_id: str,
+    line: int, side: str = "RIGHT", start_line: int | None = None,
+    start_side: str | None = None,
+) -> bool:
+    """Post a line-anchored PR review comment (GitHub's pulls/{n}/comments).
+
+    Anchors `text` to `path` at `line` on `side` (RIGHT = new, LEFT = old). For
+    a multi-line range, pass start_line (< line) + start_side. Numeric fields use
+    `-F` (typed); strings use `-f`. All values are discrete argv — never shell.
+    """
+    cmd = [
+        "gh", "api", "--method", "POST",
+        f"repos/{owner}/{repo}/pulls/{number}/comments",
+        "-f", f"body={text}",
+        "-f", f"commit_id={commit_id}",
+        "-f", f"path={path}",
+        "-F", f"line={line}",
+        "-f", f"side={side}",
+    ]
+    if start_line is not None and start_line < line:
+        cmd += ["-F", f"start_line={start_line}", "-f", f"start_side={start_side or side}"]
+    result = _run(cmd)
+    return result.returncode == 0

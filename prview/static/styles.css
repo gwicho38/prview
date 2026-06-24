@@ -433,6 +433,11 @@ a { color: var(--accent); }
   word-break: break-word;
 }
 
+/* Inline line-anchored comment row injected into the diff table. */
+.diff-region tr.comment-row > td { padding: 6px 12px 6px 4.5em; background: var(--bg-elev); border-top: 1px solid var(--border); }
+.diff-region tr.comment-row .comment-bubble { max-width: 90%; margin: 2px 0; }
+.diff-region tr.comment-row .fd-comments-title { margin-bottom: 4px; }
+
 /* ---- Inline "explain selection" --------------------------------------- */
 .sel-explain-btn {
   position: fixed;

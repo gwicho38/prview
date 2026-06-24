@@ -92,6 +92,23 @@ class FlagRequest(FileTarget):
 
 class CommentRequest(FileTarget):
     text: str
+    # Optional line anchor (new-side diff lines). When `line` is set the comment
+    # is posted as a GitHub review comment on path@line; `start_line` (< line)
+    # makes it a multi-line range. Absent → a general PR comment (file-level).
+    line: int | None = None
+    start_line: int | None = None
+    side: str = "RIGHT"
+
+
+class CommentModel(BaseModel):
+    text: str
+    line: int | None = None
+    start_line: int | None = None
+
+    @classmethod
+    def coerce(cls, c) -> "CommentModel":
+        # Tolerate legacy entries persisted as bare strings (pre-line-anchor).
+        return cls(text=c) if isinstance(c, str) else cls(**c)
 
 
 class SubmitRequest(PRTarget):
@@ -132,7 +149,7 @@ class FileListItem(BaseModel):
     flagged: bool = False
     flag_note: str = ""
     viewed: bool = False
-    comments: list[str] = []
+    comments: list[CommentModel] = []
 
     @classmethod
     def of(cls, fd: FileDiff) -> "FileListItem":
@@ -143,7 +160,7 @@ class FileListItem(BaseModel):
             flagged=fd.flagged,
             flag_note=fd.flag_note,
             viewed=fd.viewed,
-            comments=list(fd.comments),
+            comments=[CommentModel.coerce(c) for c in fd.comments],
         )
 
 
@@ -155,7 +172,7 @@ class ReviewStateModel(BaseModel):
     viewed: list[str] = []
     flagged: dict[str, str] = {}
     comments: int = 0
-    comment_threads: dict[str, list[str]] = {}
+    comment_threads: dict[str, list[CommentModel]] = {}
     submitted: bool = False
 
     @classmethod
@@ -164,7 +181,10 @@ class ReviewStateModel(BaseModel):
             viewed=list(state.get("viewed", [])),
             flagged=dict(state.get("flagged", {})),
             comments=int(state.get("comments", 0)),
-            comment_threads={k: list(v) for k, v in state.get("comment_threads", {}).items()},
+            comment_threads={
+                k: [CommentModel.coerce(c) for c in v]
+                for k, v in state.get("comment_threads", {}).items()
+            },
             submitted=bool(state.get("submitted", False)),
         )
 

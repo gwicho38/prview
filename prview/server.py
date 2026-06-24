@@ -240,12 +240,23 @@ def file_flag(req: FlagRequest) -> FlagResponse:
 
 @app.post("/comment", response_model=OkResponse)
 def post_comment(req: CommentRequest) -> OkResponse:
-    ok = gh.post_pr_comment(req.owner, req.repo, req.number, req.path, req.text)
+    # Line-anchored → a GitHub review comment on path@line (range when
+    # start_line is set); otherwise a general, file-level PR comment.
+    if req.line is not None:
+        commit_id = gh.pr_head_sha(req.owner, req.repo, req.number)
+        ok = gh.post_pr_review_comment(
+            req.owner, req.repo, req.number, req.path, req.text, commit_id,
+            line=req.line, side=req.side, start_line=req.start_line,
+        )
+    else:
+        ok = gh.post_pr_comment(req.owner, req.repo, req.number, req.path, req.text)
     if ok:
+        entry = {"text": req.text, "line": req.line, "start_line": req.start_line}
+
         def mutate(state: dict) -> dict:
             state["comments"] = int(state.get("comments", 0)) + 1
             threads = dict(state.get("comment_threads", {}))
-            threads[req.path] = [*threads.get(req.path, []), req.text]
+            threads[req.path] = [*threads.get(req.path, []), entry]
             state["comment_threads"] = threads
             return state
 

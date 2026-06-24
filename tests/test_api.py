@@ -190,16 +190,46 @@ def test_comment_preserves_prefix_and_increments(client, monkeypatch):
     assert captured["text"] == "nit"
     st = core.load_review_state("octo", "hello", 7)
     assert st["comments"] == 1
-    # comment text persists per-file so the UI can render it as a bubble
-    assert st["comment_threads"] == {"big.py": ["nit"]}
+    # file-level comment persists as an entry with no line anchor
+    assert st["comment_threads"] == {"big.py": [{"text": "nit", "line": None, "start_line": None}]}
     # a second comment on the same file appends rather than replacing
     client.post("/comment", json={"owner": "octo", "repo": "hello", "number": 7, "path": "big.py", "text": "another"})
     st2 = core.load_review_state("octo", "hello", 7)
-    assert st2["comment_threads"]["big.py"] == ["nit", "another"]
+    assert [c["text"] for c in st2["comment_threads"]["big.py"]] == ["nit", "another"]
     assert st2["comments"] == 2
     # the state endpoint surfaces the threads so the client can hydrate bubbles
     state = client.get("/state/octo/hello/7").json()
-    assert state["comment_threads"]["big.py"] == ["nit", "another"]
+    assert [c["text"] for c in state["comment_threads"]["big.py"]] == ["nit", "another"]
+
+
+def test_comment_with_line_posts_review_comment(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    captured = {}
+
+    def fake_review(owner, repo, number, path, text, commit_id, line, side="RIGHT",
+                    start_line=None, start_side=None):
+        captured.update(path=path, text=text, commit_id=commit_id, line=line,
+                        side=side, start_line=start_line)
+        return True
+
+    monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "deadbeef")
+    monkeypatch.setattr(gh, "post_pr_review_comment", fake_review)
+    # a general PR comment must NOT be used when a line anchor is present
+    monkeypatch.setattr(gh, "post_pr_comment",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("used general comment")))
+
+    resp = client.post("/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7, "path": "big.py",
+        "text": "range nit", "line": 5, "start_line": 3, "side": "RIGHT",
+    })
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    assert captured == {"path": "big.py", "text": "range nit", "commit_id": "deadbeef",
+                        "line": 5, "side": "RIGHT", "start_line": 3}
+    # persisted with its line anchor so the UI can render it inline
+    st = core.load_review_state("octo", "hello", 7)
+    assert st["comment_threads"]["big.py"] == [{"text": "range nit", "line": 5, "start_line": 3}]
+    state = client.get("/state/octo/hello/7").json()
+    assert state["comment_threads"]["big.py"][0]["line"] == 5
 
 
 def test_review_submit_maps_event_and_marks_submitted(client, monkeypatch):

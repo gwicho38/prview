@@ -257,7 +257,8 @@ function applyReviewToFiles() {
     f.viewed = viewed.has(f.filename);
     f.flagged = Object.prototype.hasOwnProperty.call(flagged, f.filename);
     f.flag_note = flagged[f.filename] || "";
-    f.comments = (threads[f.filename] || []).slice();
+    f.comments = (threads[f.filename] || []).map((c) =>
+      typeof c === "string" ? { text: c, line: null, start_line: null } : c);
   }
 }
 
@@ -476,23 +477,87 @@ function selectFile(i) {
 // ============================================================================
 // component:file-detail — header, action bar, ai-panel, diff (lazy per file)
 // ============================================================================
-// Fills a container with one bubble per comment posted on this file. Comment
-// text is user-authored → textContent only (never innerHTML) to stay XSS-safe.
+// A comment is {text, line, start_line}; line-anchored ones (line != null) are
+// rendered inline at their diff line (see injectInlineComments), so the
+// file-level area shows only the unanchored (file-scoped) comments.
+function commentLabel(c) {
+  if (c.line == null) return "";
+  return c.start_line != null && c.start_line !== c.line
+    ? `lines ${c.start_line}–${c.line}` : `line ${c.line}`;
+}
+
+function makeBubble(c) {
+  // Comment text is user-authored → textContent only (never innerHTML), XSS-safe.
+  const bubble = document.createElement("div");
+  bubble.className = "comment-bubble";
+  bubble.textContent = c.text;
+  return bubble;
+}
+
+// Fills the file-level area with bubbles for file-scoped comments (no line).
 function renderCommentBubbles(container, f) {
   container.innerHTML = "";
-  const list = f.comments || [];
+  const list = (f.comments || []).filter((c) => c.line == null);
   container.hidden = list.length === 0;
   if (!list.length) return;
   const title = document.createElement("div");
   title.className = "fd-comments-title";
   title.textContent = list.length === 1 ? "Your comment" : `Your comments (${list.length})`;
   container.appendChild(title);
-  for (const text of list) {
-    const bubble = document.createElement("div");
-    bubble.className = "comment-bubble";
-    bubble.textContent = text;
-    container.appendChild(bubble);
+  for (const c of list) container.appendChild(makeBubble(c));
+}
+
+// After the diff renders, drop each line-anchored comment into a row directly
+// beneath its target new-side line — mirroring GitHub's inline review threads.
+function injectInlineComments(region, f) {
+  const anchored = (f && f.comments || []).filter((c) => c.line != null);
+  if (!anchored.length) return;
+  // Map each new-side line number → its diff row.
+  const rowByLine = new Map();
+  for (const row of region.querySelectorAll("tr")) {
+    const num = row.querySelector(".line-num2");
+    const n = num && parseInt(num.textContent.trim(), 10);
+    if (Number.isInteger(n)) rowByLine.set(n, row);
   }
+  for (const c of anchored) {
+    const row = rowByLine.get(c.line);
+    if (!row) continue;
+    const tr = document.createElement("tr");
+    tr.className = "comment-row";
+    const td = document.createElement("td");
+    td.colSpan = 2;
+    const bubble = makeBubble(c);
+    const lbl = commentLabel(c);
+    if (lbl) {
+      const tag = document.createElement("div");
+      tag.className = "fd-comments-title";
+      tag.textContent = lbl;
+      td.append(tag, bubble);
+    } else {
+      td.appendChild(bubble);
+    }
+    tr.appendChild(td);
+    row.after(tr);
+  }
+}
+
+// New-side line range covered by the current diff text selection, or null.
+// Captured when the comment modal opens (focusing it would clear the selection).
+function selectedNewLineRange() {
+  const sel = window.getSelection();
+  const region = document.getElementById("diff-region");
+  if (!sel || sel.isCollapsed || !sel.rangeCount || !region) return null;
+  if (!region.contains(sel.getRangeAt(0).commonAncestorContainer)) return null;
+  const nums = [];
+  for (const row of region.querySelectorAll("tr")) {
+    const code = row.querySelector(".d2h-code-line, .d2h-code-side-line");
+    if (!code || !sel.containsNode(code, true)) continue;
+    const num = row.querySelector(".line-num2");
+    const n = num && parseInt(num.textContent.trim(), 10);
+    if (Number.isInteger(n)) nums.push(n);
+  }
+  if (!nums.length) return null;
+  return { start: Math.min(...nums), end: Math.max(...nums) };
 }
 
 function renderFileDetail() {
@@ -610,6 +675,7 @@ function renderDiff(detail, region) {
       highlight: false,         // vendored ui-base bundle has no highlight.js; would throw
     });
     ui.draw();
+    injectInlineComments(region, currentFile());
   } catch {
     const ph = document.createElement("div");
     ph.className = "diff-placeholder";
@@ -1135,16 +1201,23 @@ function modalIsOpen() { return !document.getElementById("modal-root").hidden; }
 function openCommentModal() {
   const f = currentFile();
   if (!f) return;
+  // Capture the diff selection NOW — focusing the modal textarea clears it.
+  const range = selectedNewLineRange();
+  const anchor = range
+    ? (range.start !== range.end ? `lines ${range.start}–${range.end}` : `line ${range.end}`)
+    : null;
   openModal({
-    title: `Comment on  ${f.filename}`,
+    title: anchor ? `Comment on  ${f.filename} · ${anchor}` : `Comment on  ${f.filename}`,
     render: (modal, body) => {
       body.className = "modal-body";
       const lbl = document.createElement("label");
-      lbl.textContent = "Comment";
+      lbl.textContent = anchor ? `Comment (anchored to ${anchor})` : "Comment";
       const ta = document.createElement("textarea");
       ta.className = "textarea";
       ta.id = "comment-text";
-      ta.placeholder = "Add a comment scoped to this file…";
+      ta.placeholder = anchor
+        ? `Add a review comment on ${anchor}…`
+        : "Add a comment scoped to this file (select code first to anchor it)…";
       body.append(lbl, ta);
 
       const foot = document.createElement("div");
@@ -1160,15 +1233,26 @@ function openCommentModal() {
         post.disabled = true; cancel.disabled = true;
         post.innerHTML = '<span class="spinner spinner-sm"></span> Posting…';
         try {
-          const res = await api("POST", "/comment", { ...prKey(), path: f.filename, text });
+          const payload = { ...prKey(), path: f.filename, text };
+          if (range) {
+            payload.line = range.end;
+            payload.side = "RIGHT";
+            if (range.start !== range.end) payload.start_line = range.start;
+          }
+          const res = await api("POST", "/comment", payload);
           if (res && res.ok) {
             State.review.comments = (State.review.comments || 0) + 1;
+            const entry = {
+              text,
+              line: range ? range.end : null,
+              start_line: range && range.start !== range.end ? range.start : null,
+            };
             const threads = State.review.comment_threads || (State.review.comment_threads = {});
-            threads[f.filename] = [...(threads[f.filename] || []), text];
-            f.comments = [...(f.comments || []), text];
+            threads[f.filename] = [...(threads[f.filename] || []), entry];
+            f.comments = [...(f.comments || []), entry];
             closeModal();
             renderFileDetail();
-            toast("Comment posted");
+            toast(range ? "Review comment posted" : "Comment posted");
           } else {
             throw new Error((res && res.error) || "comment failed");
           }

@@ -55,6 +55,17 @@
       </div>
     </main>
 
+    <!-- screen:repowise -->
+    <main class="screen" id="screen-repowise" hidden>
+      <div class="repowise-grid">
+        <!-- component:pr-summary (re-rendered, with nav-tabs) -->
+        <section class="pr-summary" id="pr-summary-repowise" aria-label="Pull request summary"></section>
+
+        <!-- repowise content region: prepare | embed | fallback | error -->
+        <section class="repowise-region" id="repowise-region" role="tabpanel" aria-label="Repowise analysis"></section>
+      </div>
+    </main>
+
     <!-- screen:submit-review -->
     <main class="screen" id="screen-submit" hidden>
       <div class="submit-wrap" id="submit-body"></div>

@@ -190,6 +190,16 @@ def test_comment_preserves_prefix_and_increments(client, monkeypatch):
     assert captured["text"] == "nit"
     st = core.load_review_state("octo", "hello", 7)
     assert st["comments"] == 1
+    # comment text persists per-file so the UI can render it as a bubble
+    assert st["comment_threads"] == {"big.py": ["nit"]}
+    # a second comment on the same file appends rather than replacing
+    client.post("/comment", json={"owner": "octo", "repo": "hello", "number": 7, "path": "big.py", "text": "another"})
+    st2 = core.load_review_state("octo", "hello", 7)
+    assert st2["comment_threads"]["big.py"] == ["nit", "another"]
+    assert st2["comments"] == 2
+    # the state endpoint surfaces the threads so the client can hydrate bubbles
+    state = client.get("/state/octo/hello/7").json()
+    assert state["comment_threads"]["big.py"] == ["nit", "another"]
 
 
 def test_review_submit_maps_event_and_marks_submitted(client, monkeypatch):

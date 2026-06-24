@@ -25,6 +25,7 @@ const State = {
   idx: 0,              // current file index
   detailCache: {},     // path -> FileDetail
   ai: {},              // path -> {mode, status, jobId, result, qa, timer, t0, prevMode}
+  rw: null,            // repowise prepare state for the current PR (see Repowise)
 };
 
 function prKey() {
@@ -94,6 +95,7 @@ function refString() {
 const Screens = {
   landing: document.getElementById("screen-landing"),
   review: document.getElementById("screen-review"),
+  repowise: document.getElementById("screen-repowise"),
   submit: document.getElementById("screen-submit"),
 };
 let activeScreen = "landing";
@@ -103,6 +105,8 @@ function show(screen) {
   for (const [name, el] of Object.entries(Screens)) el.hidden = name !== screen;
   if (screen === "landing") loadResumeList();
   if (screen === "submit") renderSubmit();
+  if (screen === "review") renderSummary();
+  if (screen === "repowise") { renderSummary(); renderRepowise(); }
 }
 
 // ----------------------------------------------------------------------------
@@ -236,6 +240,7 @@ function enterReview(data) {
   State.review = data.review || data.state; // server key is `state`
   State.detailCache = {};
   State.ai = {};
+  State.rw = null;
   applyReviewToFiles();
   State.idx = firstUnviewedIndex();
   show("review");
@@ -247,10 +252,12 @@ function enterReview(data) {
 function applyReviewToFiles() {
   const viewed = new Set(State.review.viewed || []);
   const flagged = State.review.flagged || {};
+  const threads = State.review.comment_threads || {};
   for (const f of State.files) {
     f.viewed = viewed.has(f.filename);
     f.flagged = Object.prototype.hasOwnProperty.call(flagged, f.filename);
     f.flag_note = flagged[f.filename] || "";
+    f.comments = (threads[f.filename] || []).slice();
   }
 }
 
@@ -280,11 +287,51 @@ const DECISION_GLYPH = {
 const DECISION_NONE = { g: "◷", cls: "glyph-none", label: "none yet" };
 function decisionGlyph(d) { return DECISION_GLYPH[(d || "").toLowerCase()] || DECISION_NONE; }
 
+// nav-tabs (Review / Repowise): a tablist that drives the router. Active tab is
+// glyph (▸) + accent underline + accent color — never color alone. The `g`
+// keycap mirrors the existing single-key shortcut affordances.
+function buildNavTabs() {
+  const tabs = document.createElement("div");
+  tabs.className = "nav-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Review or Repowise");
+  const active = activeScreen === "repowise" ? "repowise" : "review";
+  const mk = (key, label) => {
+    const b = document.createElement("button");
+    b.className = "nav-tab";
+    b.setAttribute("role", "tab");
+    const selected = key === active;
+    b.setAttribute("aria-selected", selected ? "true" : "false");
+    const mark = document.createElement("span");
+    mark.className = "nav-tab-mark";
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = selected ? "▸" : "";
+    const txt = document.createElement("span");
+    txt.textContent = label;
+    b.append(mark, txt);
+    b.addEventListener("click", () => { if (key !== active) show(key); });
+    return b;
+  };
+  tabs.append(mk("review", "Review"), mk("repowise", "Repowise"));
+  const hint = document.createElement("span");
+  hint.className = "kbd nav-tabs-hint";
+  hint.textContent = "g";
+  const wrap = document.createElement("span");
+  wrap.style.display = "inline-flex";
+  wrap.style.alignItems = "center";
+  wrap.style.gap = "6px";
+  wrap.append(tabs, hint);
+  return wrap;
+}
+
 function renderSummary() {
+  if (!State.pr) return;
   const pr = State.pr;
   const ci = ciGlyph(pr.ci_status);
   const dec = decisionGlyph(pr.review_decision);
-  const el = document.getElementById("pr-summary");
+  const el = document.getElementById(
+    activeScreen === "repowise" ? "pr-summary-repowise" : "pr-summary");
+  if (!el) return;
   el.innerHTML = "";
 
   const drawerBtn = document.createElement("button");
@@ -321,7 +368,9 @@ function renderSummary() {
   submit.className = "btn btn-primary submit-entry";
   submit.innerHTML = 'Submit <span class="kbd">s</span>';
   submit.addEventListener("click", () => show("submit"));
-  statusRow.append(ciEl, decEl, submit);
+  // nav-tabs sit before .submit-entry so .submit-entry's margin-left:auto still
+  // pins Submit to the far right.
+  statusRow.append(ciEl, decEl, buildNavTabs(), submit);
 
   el.append(title, meta, statusRow);
 }
@@ -427,6 +476,25 @@ function selectFile(i) {
 // ============================================================================
 // component:file-detail — header, action bar, ai-panel, diff (lazy per file)
 // ============================================================================
+// Fills a container with one bubble per comment posted on this file. Comment
+// text is user-authored → textContent only (never innerHTML) to stay XSS-safe.
+function renderCommentBubbles(container, f) {
+  container.innerHTML = "";
+  const list = f.comments || [];
+  container.hidden = list.length === 0;
+  if (!list.length) return;
+  const title = document.createElement("div");
+  title.className = "fd-comments-title";
+  title.textContent = list.length === 1 ? "Your comment" : `Your comments (${list.length})`;
+  container.appendChild(title);
+  for (const text of list) {
+    const bubble = document.createElement("div");
+    bubble.className = "comment-bubble";
+    bubble.textContent = text;
+    container.appendChild(bubble);
+  }
+}
+
 function renderFileDetail() {
   const el = document.getElementById("file-detail");
   el.innerHTML = "";
@@ -450,6 +518,11 @@ function renderFileDetail() {
   aiPanel.className = "ai-panel";
   aiPanel.id = "ai-panel";
 
+  const comments = document.createElement("div");
+  comments.className = "fd-comments";
+  comments.id = "fd-comments";
+  renderCommentBubbles(comments, f);
+
   const diffRegion = document.createElement("div");
   diffRegion.className = "diff-region";
   diffRegion.id = "diff-region";
@@ -457,11 +530,12 @@ function renderFileDetail() {
 
   const actions = buildActionBar(f);
 
-  // Scrolling content (header + AI panel + diff) lives in its own region; the
-  // action bar is a fixed-height row beneath it, so it never overlaps the diff.
+  // Scrolling content (header + AI panel + comments + diff) lives in its own
+  // region; the action bar is a fixed-height row beneath it, so it never
+  // overlaps the diff.
   const scroll = document.createElement("div");
   scroll.className = "fd-scroll";
-  scroll.append(header, aiPanel, diffRegion);
+  scroll.append(header, aiPanel, comments, diffRegion);
   el.append(scroll, actions);
 
   loadDiff(f.filename, diffRegion);
@@ -1089,7 +1163,11 @@ function openCommentModal() {
           const res = await api("POST", "/comment", { ...prKey(), path: f.filename, text });
           if (res && res.ok) {
             State.review.comments = (State.review.comments || 0) + 1;
+            const threads = State.review.comment_threads || (State.review.comment_threads = {});
+            threads[f.filename] = [...(threads[f.filename] || []), text];
+            f.comments = [...(f.comments || []), text];
             closeModal();
+            renderFileDetail();
             toast("Comment posted");
           } else {
             throw new Error((res && res.error) || "comment failed");
@@ -1323,7 +1401,530 @@ async function doSubmit(submit, cancel, dec, bodyTa) {
 }
 
 // ============================================================================
-// Global keyboard shortcuts: v e a c f s b j k q
+// screen:repowise — status → branch (modal | prepare+poll → embed | fallback)
+// component:nav-tabs · repowise-prepare · repo-path-prompt · embed · fallback · error
+// ============================================================================
+const RW_STEPS = [
+  { key: "resolve_path", label: "Resolve local repo path" },
+  { key: "checkout", label: "Checkout PR head" },
+  { key: "index", label: "Index repo (repowise init)" },
+  { key: "serve", label: "Start repowise serve" },
+  { key: "open", label: "Open dashboard" },
+];
+const REPOWISE_DOCS = "https://github.com/repowise/repowise";
+
+// Per-PR cache key so switching tabs does not re-prepare an already-prepared PR.
+function rwPrKey() { const { owner, repo, number } = prKey(); return `${owner}/${repo}#${number}`; }
+
+function rwState() {
+  if (!State.rw || State.rw.key !== rwPrKey()) {
+    State.rw = { key: rwPrKey(), phase: "idle", jobId: null, snap: null, t0: 0, alive: false };
+  }
+  return State.rw;
+}
+
+function rwRegion() { return document.getElementById("repowise-region"); }
+function rwIsActive() { return activeScreen === "repowise"; }
+
+// renderRepowise: entry point when the Repowise tab is shown. If already
+// prepared/embedded for this PR, re-render the cached result without re-preparing.
+async function renderRepowise() {
+  const rw = rwState();
+  if (rw.phase === "embed") { renderRwEmbed(rw); return; }
+  if (rw.phase === "fallback") { renderRwFallback(rw); return; }
+  if (rw.phase === "error") { renderRwError(rw); return; }
+  if (rw.phase === "preparing" && rw.snap) { renderRwPrepare(rw); return; }
+  if (rw.phase === "preparing") return; // submit in flight; tick will render
+  await rwStartFlow();
+}
+
+async function rwStartFlow() {
+  const rw = rwState();
+  rwShowLoading("Checking repowise…");
+  let status;
+  try {
+    const { owner, repo, number } = prKey();
+    status = await api("GET", `/repowise/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&number=${number}`);
+  } catch (e) {
+    rw.phase = "error";
+    rw.snap = { error: e.message, error_hint: e.hint || "", error_step: null, steps: [] };
+    renderRwError(rw);
+    return;
+  }
+  if (!rwIsActive()) return;
+  if (!status.cli_present) {
+    rw.phase = "error";
+    rw.snap = { error: "repowise CLI not found on PATH",
+                error_hint: status.cli_hint || "install it: uv tool install repowise",
+                error_step: "serve", steps: [], variant: "cli" };
+    renderRwError(rw);
+    return;
+  }
+  if (status.node_ok === false) {
+    rw.phase = "error";
+    rw.snap = { error: "Node.js not available for repowise",
+                error_hint: status.node_hint || "install Node.js",
+                error_step: "serve", steps: [], variant: "cli" };
+    renderRwError(rw);
+    return;
+  }
+  if (!status.repo_path_known) {
+    openRepoPathModal();
+    return;
+  }
+  rwPrepare();
+}
+
+async function rwPrepare() {
+  const rw = rwState();
+  rw.phase = "preparing";
+  rw.snap = null;
+  rw.t0 = Date.now();
+  rw.alive = true;
+  rwShowLoading("Preparing repowise analysis…");
+  try {
+    const { owner, repo, number } = prKey();
+    const { job_id } = await api("POST", "/repowise/prepare", { owner, repo, number });
+    rw.jobId = job_id;
+    pollPrepare(job_id);
+  } catch (e) {
+    // 409 = path unknown → reopen modal; anything else → error panel.
+    if (e instanceof ApiError && e.status === 409) { openRepoPathModal(); return; }
+    rw.phase = "error";
+    rw.snap = { error: e.message, error_hint: e.hint || "", error_step: null, steps: [] };
+    renderRwError(rw);
+  }
+}
+
+// Poller over /repowise/prepare/{job_id} (distinct from /job/{id}, so this is a
+// sibling of pollJobId rather than a reuse of it).
+function pollPrepare(jobId) {
+  const rw = rwState();
+  const tick = async () => {
+    if (!rw.alive || rw.jobId !== jobId) return;
+    let snap;
+    try { snap = await api("GET", `/repowise/prepare/${jobId}`); }
+    catch { setTimeout(tick, POLL_MS); return; }
+    if (!rw.alive || rw.jobId !== jobId) return;
+    rw.snap = snap;
+    if (snap.status === "done") {
+      rw.alive = false;
+      rw.phase = snap.frameable ? "embed" : "fallback";
+      announce("repowise analysis ready");
+      if (rwIsActive()) renderRepowise();
+    } else if (snap.status === "error") {
+      rw.alive = false;
+      rw.phase = "error";
+      announce("repowise prepare failed");
+      if (rwIsActive()) renderRwError(rw);
+    } else if (snap.status === "cancelled") {
+      rw.alive = false;
+      rw.phase = "idle";
+    } else {
+      if (rwIsActive()) renderRwPrepare(rw);
+      setTimeout(tick, POLL_MS);
+    }
+  };
+  setTimeout(tick, POLL_MS);
+}
+
+function rwShowLoading(msg) {
+  const el = rwRegion();
+  if (!el) return;
+  el.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "rw-prepare";
+  const ld = document.createElement("div");
+  ld.className = "ai-loading";
+  ld.innerHTML = `<span class="spinner"></span> ${escapeHtml(msg)}`;
+  wrap.appendChild(ld);
+  el.appendChild(wrap);
+}
+
+function rwElapsedStr(t0) {
+  const secs = Math.max(0, Math.floor((Date.now() - (t0 || Date.now())) / 1000));
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// ---- component:repowise-prepare -------------------------------------------
+function renderRwPrepare(rw) {
+  const el = rwRegion();
+  if (!el || !rwIsActive()) return;
+  const snap = rw.snap || { steps: [] };
+  const byKey = {};
+  for (const s of (snap.steps || [])) byKey[s.key] = s;
+  el.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "rw-prepare";
+
+  const title = document.createElement("div");
+  title.className = "rw-prepare-title";
+  title.textContent = `Preparing repowise analysis · ${refString()}`;
+  wrap.appendChild(title);
+
+  const list = document.createElement("ol");
+  list.className = "rw-steps";
+  for (const def of RW_STEPS) {
+    const st = byKey[def.key] || { status: "pending", detail: "" };
+    const li = document.createElement("li");
+    li.className = "rw-step is-" + st.status;
+
+    const g = document.createElement("span");
+    g.className = "rw-step-glyph";
+    if (st.status === "running") {
+      g.innerHTML = '<span class="spinner"></span>';
+    } else {
+      const glyph = st.status === "done" ? { t: "✓", c: "glyph-pass" }
+        : st.status === "failed" ? { t: "✗", c: "glyph-fail" }
+        : st.status === "skipped" ? { t: "◷", c: "glyph-none" }
+        : { t: "○", c: "glyph-none" };
+      g.innerHTML = `<span class="${glyph.c}">${glyph.t}</span>`;
+    }
+
+    const main = document.createElement("div");
+    const label = document.createElement("div");
+    label.className = "rw-step-label";
+    label.textContent = def.label;
+    main.appendChild(label);
+
+    const subParts = [];
+    if (st.detail) subParts.push(st.detail);
+    if (st.status === "running") subParts.push(`${rwElapsedStr(rw.t0)} elapsed`);
+    if (subParts.length) {
+      const sub = document.createElement("div");
+      sub.className = "rw-step-sub";
+      sub.textContent = subParts.join("   ·   ");
+      main.appendChild(sub);
+    }
+    li.append(g, main);
+    list.appendChild(li);
+  }
+  wrap.appendChild(list);
+
+  const prog = document.createElement("div");
+  prog.className = "rw-prepare-progress";
+  prog.innerHTML = '<span class="ai-progress-track"><span class="ai-progress-indef"></span></span> may take up to 30s';
+  wrap.appendChild(prog);
+
+  const foot = document.createElement("div");
+  foot.className = "rw-prepare-foot";
+  const cancel = document.createElement("button");
+  cancel.className = "btn";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", rwCancel);
+  foot.appendChild(cancel);
+  wrap.appendChild(foot);
+
+  el.appendChild(wrap);
+}
+
+async function rwCancel() {
+  const rw = rwState();
+  const jobId = rw.jobId;
+  rw.alive = false;
+  rw.phase = "idle";
+  rw.jobId = null;
+  show("review");
+  if (jobId) { try { await api("POST", `/repowise/prepare/${jobId}/cancel`); } catch { /* best-effort */ } }
+}
+
+// ---- component:repowise-embed ---------------------------------------------
+function renderRwEmbed(rw) {
+  const el = rwRegion();
+  if (!el || !rwIsActive()) return;
+  const snap = rw.snap;
+  const url = snap.dashboard_url || "";
+  const pr = State.pr;
+  el.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "rw-embed";
+
+  const bar = document.createElement("div");
+  bar.className = "rw-embed-bar";
+  const ctx = document.createElement("span");
+  const mark = document.createElement("span");
+  mark.className = "rw-bar-mark"; mark.textContent = "◆";
+  const ctxText = document.createElement("span");
+  ctxText.className = "rw-bar-ctx";
+  ctxText.textContent = ` repowise · ${refString()} @ ${pr.head || "?"}`;
+  const port = document.createElement("span");
+  port.textContent = snap.serve_port ? `  ·  :${snap.serve_port}` : "";
+  ctx.append(mark, ctxText, port);
+
+  const actions = document.createElement("span");
+  actions.className = "rw-bar-actions";
+  const restart = document.createElement("button");
+  restart.className = "btn btn-ghost";
+  restart.textContent = "↻ Restart";
+  restart.addEventListener("click", rwRestart);
+  const open = document.createElement("button");
+  open.className = "btn btn-ghost";
+  open.textContent = "Open ↗";
+  open.addEventListener("click", () => window.open(url, "_blank", "noopener"));
+  actions.append(restart, open);
+  bar.append(ctx, actions);
+
+  const frame = document.createElement("div");
+  frame.className = "rw-embed-frame";
+  const iframe = document.createElement("iframe");
+  iframe.src = url;
+  iframe.title = `repowise dashboard for ${refString()}`;
+  // The embedded dashboard is a DIFFERENT-origin localhost server NOT behind prview's
+  // token gate. Sandbox it so it can't navigate the top frame or reach prview's origin;
+  // allow-scripts+allow-same-origin so repowise's own SPA + same-origin XHR still work.
+  iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-popups";
+  iframe.referrerPolicy = "no-referrer";
+  frame.appendChild(iframe);
+
+  wrap.append(bar, frame);
+  el.appendChild(wrap);
+}
+
+async function rwRestart() {
+  const rw = rwState();
+  const { owner, repo } = prKey();
+  try { await api("POST", "/repowise/stop", { owner, repo }); } catch { /* best-effort */ }
+  rw.phase = "idle";
+  rw.jobId = null;
+  rw.snap = null;
+  rwPrepare();
+}
+
+// ---- component:repowise-link-fallback -------------------------------------
+function renderRwFallback(rw) {
+  const el = rwRegion();
+  if (!el || !rwIsActive()) return;
+  const url = (rw.snap && rw.snap.dashboard_url) || "";
+  el.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "rw-fallback";
+
+  const head = document.createElement("div");
+  head.className = "rw-fallback-mark";
+  head.innerHTML = '<span class="rw-bar-mark">◆</span> repowise can’t be embedded here';
+
+  const text = document.createElement("div");
+  text.className = "rw-fallback-text";
+  text.textContent = `repowise's dashboard blocks being shown inside another page (frame-ancestors). Open it in a new browser tab — it's already running for ${refString()}.`;
+
+  const open = document.createElement("button");
+  open.className = "btn btn-primary";
+  open.textContent = "Open repowise analysis ↗";
+  open.addEventListener("click", () => window.open(url, "_blank", "noopener"));
+
+  const urlRow = document.createElement("div");
+  urlRow.className = "rw-url-row";
+  const urlEl = document.createElement("span");
+  urlEl.className = "rw-url";
+  urlEl.textContent = url;
+  const copy = document.createElement("button");
+  copy.className = "btn";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
+    toast("Copied");
+  });
+  urlRow.append(urlEl, copy);
+
+  wrap.append(head, text, open, urlRow);
+  el.appendChild(wrap);
+}
+
+// ---- component:repowise-error ---------------------------------------------
+function renderRwError(rw) {
+  const el = rwRegion();
+  if (!el || !rwIsActive()) return;
+  const snap = rw.snap || {};
+  const variant = snap.variant
+    || (snap.error_step === "checkout" ? "checkout"
+      : snap.error_step === "serve" ? "serve" : "generic");
+  el.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "rw-error";
+
+  // Failing step header (glyph ✗) when we know which step failed.
+  if (snap.error_step) {
+    const def = RW_STEPS.find((s) => s.key === snap.error_step);
+    const head = document.createElement("div");
+    head.className = "rw-step";
+    head.innerHTML = `<span class="rw-step-glyph"><span class="glyph-fail">✗</span></span>`;
+    const lbl = document.createElement("div");
+    lbl.className = "rw-step-label";
+    lbl.textContent = def ? def.label : snap.error_step;
+    head.appendChild(lbl);
+    wrap.appendChild(head);
+  }
+
+  const err = document.createElement("div");
+  err.className = "ai-error";
+  const msg = document.createElement("span");
+  msg.textContent = `⚠ ${snap.error || "repowise prepare failed"}`;
+  err.appendChild(msg);
+  wrap.appendChild(err);
+
+  if (snap.error_hint) {
+    const hint = document.createElement("div");
+    hint.className = "rw-error-hint";
+    if (variant === "cli") {
+      // Install hint shown as inline code (e.g. `uv tool install repowise`).
+      hint.append(document.createTextNode("— "));
+      const code = document.createElement("code");
+      code.textContent = snap.error_hint;
+      hint.appendChild(code);
+    } else {
+      hint.textContent = `— ${snap.error_hint}`;
+    }
+    wrap.appendChild(hint);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "rw-error-actions";
+  const retry = document.createElement("button");
+  retry.className = "btn";
+  retry.textContent = "Retry ↻";
+  retry.addEventListener("click", rwRetry);
+  actions.appendChild(retry);
+
+  if (variant === "cli") {
+    const docs = document.createElement("button");
+    docs.className = "btn";
+    docs.textContent = "Open docs ↗";
+    docs.addEventListener("click", () => window.open(REPOWISE_DOCS, "_blank", "noopener"));
+    actions.appendChild(docs);
+  } else if (variant === "serve" && snap.stderr_tail) {
+    const view = document.createElement("button");
+    view.className = "btn";
+    view.textContent = "View output";
+    view.addEventListener("click", () => {
+      if (wrap.querySelector(".rw-stderr")) return;
+      const out = document.createElement("pre");
+      out.className = "rw-stderr";
+      out.textContent = snap.stderr_tail;
+      wrap.appendChild(out);
+    });
+    actions.appendChild(view);
+  } else if (variant === "checkout") {
+    const change = document.createElement("button");
+    change.className = "btn";
+    change.textContent = "Change path";
+    change.addEventListener("click", () => openRepoPathModal());
+    const cancel = document.createElement("button");
+    cancel.className = "btn";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => show("review"));
+    actions.append(change, cancel);
+  }
+  wrap.appendChild(actions);
+
+  el.appendChild(wrap);
+  announce("repowise prepare failed");
+}
+
+function rwRetry() {
+  const rw = rwState();
+  rw.phase = "idle";
+  rw.jobId = null;
+  rw.snap = null;
+  rwPrepare();
+}
+
+// ---- component:repo-path-prompt -------------------------------------------
+function openRepoPathModal() {
+  const { owner, repo } = prKey();
+  openModal({
+    title: `Local clone of  ${owner}/${repo}`,
+    onClose: () => {
+      // q/Esc/Cancel/backdrop: if we never resolved a path, fall back to Review
+      // (prepare cannot proceed without a path).
+      const rw = rwState();
+      if (rw.phase !== "preparing" && rw.phase !== "embed" && rw.phase !== "fallback") {
+        if (activeScreen === "repowise") show("review");
+      }
+    },
+    render: (modal, body) => {
+      body.className = "modal-body";
+
+      const desc = document.createElement("div");
+      desc.style.marginBottom = "12px";
+      desc.style.color = "var(--fg-muted)";
+      desc.textContent = `repowise runs against a local checkout. Enter the path to your clone of ${owner}/${repo}. prview remembers it per repo.`;
+      body.appendChild(desc);
+
+      const lbl = document.createElement("label");
+      lbl.textContent = "Local path";
+      const input = document.createElement("input");
+      input.className = "text-input";
+      input.type = "text";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = "~/code/repo";
+      input.style.width = "100%";
+      body.append(lbl, input);
+
+      const hint = document.createElement("div");
+      hint.className = "field-hint";
+      hint.textContent = "Tip: the directory containing the repo's .git";
+      body.appendChild(hint);
+
+      const errEl = document.createElement("div");
+      errEl.className = "field-error";
+      errEl.setAttribute("role", "alert");
+      errEl.hidden = true;
+      body.appendChild(errEl);
+
+      const foot = document.createElement("div");
+      foot.className = "modal-foot";
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "Cancel";
+      cancel.addEventListener("click", closeModal);
+      const save = document.createElement("button");
+      save.className = "btn btn-primary"; save.textContent = "Save";
+
+      const setErr = (m) => {
+        if (m) { errEl.textContent = m; errEl.hidden = false; input.classList.add("invalid"); }
+        else { errEl.hidden = true; input.classList.remove("invalid"); }
+      };
+
+      const submit = async () => {
+        const path = input.value.trim();
+        if (!path) { input.focus(); return; }
+        setErr("");
+        save.disabled = true; cancel.disabled = true;
+        save.innerHTML = '<span class="spinner spinner-sm"></span> Validating…';
+        try {
+          await api("POST", "/repowise/repo-path", { owner, repo, path }, { retryOn409: false });
+          // Persisted: close modal and continue the prepare sequence.
+          modalState && (modalState.onClose = null); // success — don't bounce to Review
+          closeModal();
+          rwPrepare();
+        } catch (e) {
+          save.disabled = false; cancel.disabled = false;
+          save.textContent = "Save";
+          // Field-scoped inline error — NOT a toast; modal stays open.
+          setErr(`⚠ ${e.message}${e.hint ? ` — ${e.hint}` : ""}`);
+          input.classList.add("invalid");
+        }
+      };
+      save.addEventListener("click", submit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); submit(); }
+        if (e.key !== "Escape") e.stopPropagation();
+      });
+      input.addEventListener("input", () => setErr(""));
+
+      foot.append(cancel, save);
+      modal.appendChild(foot);
+    },
+  });
+}
+
+// ============================================================================
+// Global keyboard shortcuts: v e a c f s b j k q g
 // ============================================================================
 function isTyping(e) {
   const t = e.target;
@@ -1344,8 +1945,20 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
+  // g toggles Review ⇄ Repowise on either tab (mnemonic: "go to").
+  if (e.key === "g" && !isTyping(e) && (activeScreen === "review" || activeScreen === "repowise")) {
+    if (activeScreen === "review" && diffSelection()) return; // selecting diff text
+    e.preventDefault();
+    show(activeScreen === "repowise" ? "review" : "repowise");
+    return;
+  }
+
   if (activeScreen === "submit") {
     if (e.key === "q" || e.key === "Escape") { if (!isTyping(e)) { e.preventDefault(); show("review"); } }
+    return;
+  }
+  if (activeScreen === "repowise") {
+    if ((e.key === "q" || e.key === "Escape") && !isTyping(e)) { e.preventDefault(); show("review"); }
     return;
   }
   if (activeScreen !== "review") return;

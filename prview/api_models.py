@@ -132,6 +132,7 @@ class FileListItem(BaseModel):
     flagged: bool = False
     flag_note: str = ""
     viewed: bool = False
+    comments: list[str] = []
 
     @classmethod
     def of(cls, fd: FileDiff) -> "FileListItem":
@@ -142,6 +143,7 @@ class FileListItem(BaseModel):
             flagged=fd.flagged,
             flag_note=fd.flag_note,
             viewed=fd.viewed,
+            comments=list(fd.comments),
         )
 
 
@@ -153,6 +155,7 @@ class ReviewStateModel(BaseModel):
     viewed: list[str] = []
     flagged: dict[str, str] = {}
     comments: int = 0
+    comment_threads: dict[str, list[str]] = {}
     submitted: bool = False
 
     @classmethod
@@ -161,6 +164,7 @@ class ReviewStateModel(BaseModel):
             viewed=list(state.get("viewed", [])),
             flagged=dict(state.get("flagged", {})),
             comments=int(state.get("comments", 0)),
+            comment_threads={k: list(v) for k, v in state.get("comment_threads", {}).items()},
             submitted=bool(state.get("submitted", False)),
         )
 
@@ -204,3 +208,76 @@ class ResumableRow(BaseModel):
     viewed_count: int
     flagged_count: int
     submitted: bool
+
+
+# ---------------------------------------------------------------------------
+# Repowise (G2) — same owner/repo validators; heavy path validation is
+# server-side in repowise.validate_and_persist_path (a non-empty string here).
+# ---------------------------------------------------------------------------
+
+class RepoRef(BaseModel):
+    owner: str
+    repo: str
+
+    @field_validator("owner")
+    @classmethod
+    def _v_owner(cls, v: str) -> str:
+        return _check_owner(v)
+
+    @field_validator("repo")
+    @classmethod
+    def _v_repo(cls, v: str) -> str:
+        return _check_repo(v)
+
+
+class RepoPathRequest(RepoRef):
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def _v_path(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("path must not be empty")
+        return v
+
+
+class RepoPathResponse(BaseModel):
+    ok: bool
+    path: str
+
+
+class PrepareRequest(PRTarget):
+    pass
+
+
+class RepowiseStatusResponse(BaseModel):
+    cli_present: bool
+    cli_hint: str | None = None
+    node_ok: bool = True
+    node_hint: str | None = None
+    repo_path_known: bool
+    repo_path: str | None = None
+    indexed: bool = False
+    serve_running: bool = False
+    serve_url: str | None = None
+    serve_port: int | None = None
+    frameable: bool | None = None
+
+
+class PrepareStep(BaseModel):
+    key: str
+    status: str  # pending | running | done | skipped | failed
+    detail: str = ""
+
+
+class PrepareSnapshot(BaseModel):
+    status: str  # running | done | error | cancelled
+    steps: list[PrepareStep]
+    elapsed: float = 0.0
+    dashboard_url: str | None = None
+    serve_port: int | None = None
+    frameable: bool | None = None
+    error: str | None = None
+    error_step: str | None = None
+    error_hint: str | None = None
+    stderr_tail: str | None = None

@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 import prview.core as core
 import prview.gh as gh
 import prview.jobs as jobs
+import prview.repowise as repowise
 import prview.state_store as state_store
 from prview.api_models import (
     AskRequest,
@@ -41,10 +42,16 @@ from prview.api_models import (
     JobIdResponse,
     JobStatusResponse,
     OkResponse,
+    PrepareRequest,
+    PrepareSnapshot,
     PRInfoModel,
     PRRefRequest,
     PRResponse,
     PRTarget,
+    RepoPathRequest,
+    RepoPathResponse,
+    RepoRef,
+    RepowiseStatusResponse,
     ResumableRow,
     ReviewStateModel,
     SubmitRequest,
@@ -66,6 +73,12 @@ def set_session_token(token: str) -> None:
 
 @app.exception_handler(gh.GhError)
 async def _gh_error_handler(request: Request, exc: gh.GhError):
+    return JSONResponse({"error": exc.message, "hint": exc.hint or None}, status_code=400)
+
+
+@app.exception_handler(repowise.RepowiseError)
+async def _repowise_error_handler(request: Request, exc: repowise.RepowiseError):
+    # Missing CLI / failed subprocess → structured 400 hint, never a leaked 500.
     return JSONResponse({"error": exc.message, "hint": exc.hint or None}, status_code=400)
 
 
@@ -231,6 +244,9 @@ def post_comment(req: CommentRequest) -> OkResponse:
     if ok:
         def mutate(state: dict) -> dict:
             state["comments"] = int(state.get("comments", 0)) + 1
+            threads = dict(state.get("comment_threads", {}))
+            threads[req.path] = [*threads.get(req.path, []), req.text]
+            state["comment_threads"] = threads
             return state
 
         state_store.mutate_state(req.owner, req.repo, req.number, mutate)
@@ -277,6 +293,67 @@ def get_state(owner: str, repo: str, n: int) -> ReviewStateModel:
 @app.get("/reviews", response_model=list[ResumableRow])
 def list_reviews() -> list[ResumableRow]:
     return [ResumableRow(**row) for row in state_store.list_resumable()]
+
+
+# --- Repowise (G2) -------------------------------------------------------------
+# Concurrency contract: routes that shell out to git/gh/repowise are sync `def`
+# (threadpool). The prepare submit/poll/cancel routes are `async` — they only
+# touch the in-memory prepare registry; the multi-step work runs on a daemon
+# thread inside prview.repowise (same model as the AI /job routes).
+
+@app.get("/repowise/status", response_model=RepowiseStatusResponse)
+def repowise_status(owner: str, repo: str, number: int) -> RepowiseStatusResponse:
+    cli_present, cli_hint = repowise.cli_present()
+    node_ok, node_hint = repowise.node_present()
+    repo_path = repowise.resolve_repo_path(owner, repo)
+    indexed = bool(repo_path) and repowise.is_repo_indexed(repo_path)
+    entry = repowise.get_serve(owner, repo)
+    return RepowiseStatusResponse(
+        cli_present=cli_present,
+        cli_hint=cli_hint,
+        node_ok=node_ok,
+        node_hint=node_hint,
+        repo_path_known=repo_path is not None,
+        repo_path=repo_path,
+        indexed=indexed,
+        serve_running=entry is not None,
+        serve_url=entry.url if entry else None,
+        serve_port=entry.ui_port if entry else None,
+        frameable=entry.frameable if entry else None,
+    )
+
+
+@app.post("/repowise/repo-path", response_model=RepoPathResponse)
+def repowise_repo_path(req: RepoPathRequest) -> RepoPathResponse:
+    result = repowise.validate_and_persist_path(req.owner, req.repo, req.path)
+    if result.get("ok"):
+        return RepoPathResponse(ok=True, path=result["path"])
+    raise _err(400, result.get("error", "invalid path"), result.get("hint"))
+
+
+@app.post("/repowise/prepare", response_model=JobIdResponse)
+async def repowise_prepare(req: PrepareRequest) -> JobIdResponse:
+    if repowise.resolve_repo_path(req.owner, req.repo) is None:
+        raise _err(409, "repo path not set", "POST /repowise/repo-path first")
+    return JobIdResponse(job_id=repowise.start_prepare(req.owner, req.repo, req.number))
+
+
+@app.get("/repowise/prepare/{job_id}", response_model=PrepareSnapshot)
+async def repowise_prepare_status(job_id: str) -> PrepareSnapshot:
+    snap = repowise.get_prepare(job_id)
+    if snap is None:
+        raise _err(404, f"No such prepare job: {job_id}")
+    return PrepareSnapshot(**snap)
+
+
+@app.post("/repowise/prepare/{job_id}/cancel", response_model=OkResponse)
+async def repowise_prepare_cancel(job_id: str) -> OkResponse:
+    return OkResponse(ok=repowise.cancel_prepare(job_id))
+
+
+@app.post("/repowise/stop", response_model=OkResponse)
+def repowise_stop(req: RepoRef) -> OkResponse:
+    return OkResponse(ok=repowise.stop_serve(req.owner, req.repo))
 
 
 # --- Static assets ------------------------------------------------------------

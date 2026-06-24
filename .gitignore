@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .playwright-mcp/
+
+# repowise local index/cache (never committed)
+.repowise/
+coverage.lcov
+lcov.info

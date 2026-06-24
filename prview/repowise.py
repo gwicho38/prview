@@ -607,6 +607,65 @@ def blast_radius(owner: str, repo: str, changed_files: list[str], max_depth: int
     )
 
 
+# Common coverage-report locations, searched in the user's main clone (where the
+# suite runs and deps live) first, then the PR worktree.
+_COVERAGE_NAMES = (
+    "coverage.lcov", "lcov.info", "coverage/lcov.info", "coverage/coverage.lcov",
+    "coverage.xml", "cobertura.xml", "coverage/cobertura.xml",
+    "clover.xml", "coverage/clover.xml",
+)
+
+
+def _detect_coverage(*roots: str | None) -> str | None:
+    for root in roots:
+        if not root:
+            continue
+        for name in _COVERAGE_NAMES:
+            p = Path(root) / name
+            if p.is_file():
+                return str(p)
+    return None
+
+
+def ingest_coverage(owner: str, repo: str, coverage_path: str | None = None) -> dict:
+    """Ingest a coverage report (LCOV/Cobertura/Clover) into the served index so
+    the dashboard's coverage / risk×coverage panels populate.
+
+    The PR worktree is a bare checkout (no deps), so the report is generated in
+    the user's main clone; we ingest it against the worktree's index. An explicit
+    path wins; otherwise we auto-detect common report names in the main clone
+    then the worktree.
+    """
+    serve = get_serve(owner, repo)
+    if serve is None or serve._proc is None or serve._proc.poll() is not None:
+        raise RepowiseError(
+            "repowise serve is not running",
+            hint="open the Repowise tab to prepare this PR first",
+        )
+    worktree = serve.repo_path
+    if coverage_path:
+        path = str(Path(coverage_path).expanduser())
+        if not Path(path).is_file():
+            raise RepowiseError(f"coverage report not found: {coverage_path}",
+                                hint="check the path, or leave it blank to auto-detect")
+    else:
+        path = _detect_coverage(resolve_repo_path(owner, repo), worktree)
+        if not path:
+            raise RepowiseError(
+                "no coverage report found",
+                hint="generate one (e.g. pytest --cov --cov-report=lcov) or pass a path",
+            )
+    result = _run(["repowise", "health", "--coverage", path,
+                   "--no-workspace", worktree], cwd=worktree)
+    if result.returncode != 0:
+        raise RepowiseError(
+            f"coverage ingest failed: {result.stderr.strip()[:200]}",
+            hint="confirm the report format (lcov / cobertura / clover)",
+        )
+    m = re.search(r"Ingested (\d+) files", (result.stdout or "") + (result.stderr or ""))
+    return {"ok": True, "files": int(m.group(1)) if m else 0, "path": path}
+
+
 def stop_serve(owner: str, repo: str) -> bool:
     """Terminate a repo's serve child and drop its registry entry."""
     key = f"{owner}/{repo}"

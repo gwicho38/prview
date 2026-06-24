@@ -341,3 +341,13 @@ class BlastRadiusModel(BaseModel):
     recommended_reviewers: list[ReviewerSuggestion] = []
     test_gaps: list[str] = []
     overall_risk_score: float = 0.0
+
+
+class CoverageIngestRequest(PRTarget):
+    path: str | None = None  # explicit report path; blank → auto-detect
+
+
+class CoverageIngestModel(BaseModel):
+    ok: bool
+    files: int = 0
+    path: str = ""

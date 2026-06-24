@@ -507,3 +507,20 @@ def test_blast_radius_route_surfaces_repowise_error(client, monkeypatch):
     })
     assert resp.status_code == 400
     assert "not running" in resp.json()["error"]
+
+
+def test_coverage_route_returns_model(client, monkeypatch):
+    captured = {}
+
+    def fake_ingest(owner, repo, path):
+        captured.update(owner=owner, repo=repo, path=path)
+        return {"ok": True, "files": 42, "path": "/x/coverage.lcov"}
+
+    monkeypatch.setattr(repowise, "ingest_coverage", fake_ingest)
+    resp = client.post("/repowise/coverage",
+                       json={"owner": "octo", "repo": "hello", "number": 7, "path": None})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True and body["files"] == 42
+    assert body["path"].endswith("coverage.lcov")
+    assert captured["path"] is None  # blank → server-side auto-detect

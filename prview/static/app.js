@@ -1751,6 +1751,10 @@ function renderRwEmbed(rw) {
     b.addEventListener("click", () => { rw.mode = mode; renderRwEmbed(rw); });
     seg.appendChild(b);
   }
+  const cov = document.createElement("button");
+  cov.className = "btn btn-ghost";
+  cov.textContent = "Ingest coverage";
+  cov.addEventListener("click", openCoverageModal);
   const restart = document.createElement("button");
   restart.className = "btn btn-ghost";
   restart.textContent = "↻ Restart";
@@ -1759,7 +1763,7 @@ function renderRwEmbed(rw) {
   open.className = "btn btn-ghost";
   open.textContent = "Open ↗";
   open.addEventListener("click", () => window.open(url, "_blank", "noopener"));
-  actions.append(seg, restart, open);
+  actions.append(seg, cov, restart, open);
   bar.append(ctx, actions);
 
   const frame = document.createElement("div");
@@ -1846,6 +1850,54 @@ function paintRwDiff(frame, b) {
   section("Suggested reviewers", b.recommended_reviewers,
     (r) => row(r.email, `${r.files} files · ${Math.round(r.ownership_pct)}%`));
   section("Test gaps", b.test_gaps, (p) => row(p));
+}
+
+// Ingest a coverage report so the dashboard's coverage / risk×coverage panels
+// populate. The report is generated in the main clone (deps live there); blank
+// path → server auto-detects common report names.
+function openCoverageModal() {
+  openModal({
+    title: "Ingest coverage report",
+    render: (modal, body) => {
+      body.className = "modal-body";
+      const lbl = document.createElement("label");
+      lbl.textContent = "Coverage report path (blank = auto-detect)";
+      const inp = document.createElement("input");
+      inp.className = "text-input";
+      inp.placeholder = "~/repos/<repo>/coverage.lcov  ·  lcov / cobertura / clover";
+      const note = document.createElement("div");
+      note.className = "modal-existing-note";
+      note.textContent = "Generate in your main clone first, e.g. pytest --cov --cov-report=lcov";
+      body.append(lbl, inp, note);
+
+      const foot = document.createElement("div");
+      foot.className = "modal-foot";
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "Cancel";
+      cancel.addEventListener("click", closeModal);
+      const go = document.createElement("button");
+      go.className = "btn btn-primary"; go.textContent = "Ingest";
+      go.addEventListener("click", async () => {
+        go.disabled = true; cancel.disabled = true;
+        go.innerHTML = '<span class="spinner spinner-sm"></span> Ingesting…';
+        try {
+          const { owner, repo, number } = prKey();
+          const res = await api("POST", "/repowise/coverage",
+            { owner, repo, number, path: inp.value.trim() || null });
+          closeModal();
+          toast(`Ingested coverage for ${res.files} files`);
+          const rw = rwState();
+          if (rw) { rw.blast = null; renderRepowise(); } // refresh panels with new data
+        } catch (e) {
+          go.disabled = false; cancel.disabled = false;
+          go.textContent = "Ingest";
+          toast(e.message, "error");
+        }
+      });
+      foot.append(cancel, go);
+      modal.appendChild(foot);
+    },
+  });
 }
 
 async function rwRestart() {

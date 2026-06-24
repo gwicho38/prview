@@ -482,6 +482,59 @@ def test_blast_radius_errors_when_serve_not_running(monkeypatch):
         assert "not running" in exc.message
 
 
+class _LiveServe:
+    def __init__(self, repo_path):
+        self.repo_path = repo_path
+        self._proc = type("P", (), {"poll": lambda self: None})()
+
+
+class _RunOut:
+    def __init__(self, rc=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+def test_ingest_coverage_explicit_path_runs_health(tmp_path, monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _LiveServe("/wt/hello-pr-9"))
+    cov = tmp_path / "coverage.lcov"
+    cov.write_text("SF:a.py\nDA:1,1\nend_of_record\n")
+    calls = []
+    monkeypatch.setattr(rw, "_run", lambda argv, cwd=None: (
+        calls.append((argv, cwd)), _RunOut(out="Ingested 12 files from coverage.lcov (lcov)."))[1])
+
+    out = rw.ingest_coverage("octo", "hello", str(cov))
+
+    assert out == {"ok": True, "files": 12, "path": str(cov)}
+    argv, cwd = calls[0]
+    assert argv == ["repowise", "health", "--coverage", str(cov),
+                    "--no-workspace", "/wt/hello-pr-9"]
+    assert cwd == "/wt/hello-pr-9"
+
+
+def test_ingest_coverage_auto_detects_in_main_clone(tmp_path, monkeypatch):
+    wt = tmp_path / "wt"; wt.mkdir()
+    main = tmp_path / "main"; main.mkdir()
+    (main / "coverage.lcov").write_text("x")
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _LiveServe(str(wt)))
+    monkeypatch.setattr(rw, "resolve_repo_path", lambda o, r: str(main))
+    seen = {}
+    monkeypatch.setattr(rw, "_run", lambda argv, cwd=None: (
+        seen.update(argv=argv), _RunOut(out="Ingested 3 files"))[1])
+
+    out = rw.ingest_coverage("o", "r", None)
+    assert out["files"] == 3
+    assert str(main / "coverage.lcov") in seen["argv"]
+
+
+def test_ingest_coverage_no_report_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _LiveServe(str(tmp_path / "wt")))
+    monkeypatch.setattr(rw, "resolve_repo_path", lambda o, r: str(tmp_path / "none"))
+    try:
+        rw.ingest_coverage("o", "r", None)
+        assert False, "expected RepowiseError"
+    except rw.RepowiseError as exc:
+        assert "no coverage report" in exc.message
+
+
 def test_ensure_indexed_skips_when_wiki_db_present(tmp_path, monkeypatch):
     """wiki.db present → skipped True, NO init subprocess invoked at all."""
     repo = tmp_path / "clone"

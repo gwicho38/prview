@@ -296,8 +296,11 @@ def prepare_pr_worktree(repo_path: str, number: int) -> tuple[str, str]:
     even when the contributor's branch lives on a fork (spec fact #7).
     """
     ref = f"prview/pr-{number}"
+    # `+` forces a non-fast-forward update of OUR managed ref: re-preparing a PR
+    # whose head was force-pushed (or rebased) would otherwise be rejected as
+    # non-fast-forward against the stale prview/pr-N ref from the last prepare.
     fetch = _run(["git", "-C", repo_path, "fetch", "origin",
-                  f"pull/{number}/head:{ref}"])
+                  f"+pull/{number}/head:{ref}"])
     if fetch.returncode != 0:
         raise RepowiseError(
             f"git fetch failed: {fetch.stderr.strip()}",

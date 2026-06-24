@@ -1755,6 +1755,10 @@ function renderRwEmbed(rw) {
   cov.className = "btn btn-ghost";
   cov.textContent = "Ingest coverage";
   cov.addEventListener("click", openCoverageModal);
+  const docs = document.createElement("button");
+  docs.className = "btn btn-ghost";
+  docs.textContent = "Generate docs";
+  docs.addEventListener("click", openDocgenModal);
   const restart = document.createElement("button");
   restart.className = "btn btn-ghost";
   restart.textContent = "↻ Restart";
@@ -1763,7 +1767,7 @@ function renderRwEmbed(rw) {
   open.className = "btn btn-ghost";
   open.textContent = "Open ↗";
   open.addEventListener("click", () => window.open(url, "_blank", "noopener"));
-  actions.append(seg, cov, restart, open);
+  actions.append(seg, cov, docs, restart, open);
   bar.append(ctx, actions);
 
   const frame = document.createElement("div");
@@ -1898,6 +1902,89 @@ function openCoverageModal() {
       modal.appendChild(foot);
     },
   });
+}
+
+// Generate the docs/wiki panel with a LOCAL ollama model (no cloud cost).
+// Long-running → kicks off a background job and polls until done.
+function openDocgenModal() {
+  openModal({
+    title: "Generate docs (local ollama)",
+    render: async (modal, body) => {
+      body.className = "modal-body";
+      const lbl = document.createElement("label");
+      lbl.textContent = "Ollama model";
+      const sel = document.createElement("select");
+      sel.className = "text-input";
+      sel.innerHTML = '<option value="">loading models…</option>';
+      const note = document.createElement("div");
+      note.className = "modal-existing-note";
+      note.textContent = "Runs repowise init via your local ollama — free, but can take several minutes.";
+      const status = document.createElement("div");
+      status.className = "rw-docgen-status";
+      body.append(lbl, sel, note, status);
+
+      try {
+        const { models } = await api("GET", "/repowise/ollama-models");
+        sel.innerHTML = "";
+        if (!models.length) {
+          sel.innerHTML = '<option value="">no models — run: ollama pull qwen2.5:3b</option>';
+        } else {
+          for (const m of models) {
+            const o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o);
+          }
+        }
+      } catch { sel.innerHTML = '<option value="">could not list models</option>'; }
+
+      const foot = document.createElement("div");
+      foot.className = "modal-foot";
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "Close";
+      cancel.addEventListener("click", closeModal);
+      const go = document.createElement("button");
+      go.className = "btn btn-primary"; go.textContent = "Generate";
+      go.addEventListener("click", async () => {
+        const model = sel.value;
+        if (!model) { toast("pull an ollama model first", "error"); return; }
+        go.disabled = true;
+        go.innerHTML = '<span class="spinner spinner-sm"></span> Generating…';
+        try {
+          const { owner, repo, number } = prKey();
+          const { job_id } = await api("POST", "/repowise/docs/generate", { owner, repo, number, model });
+          await pollDocgen(job_id, status);
+          go.disabled = false; go.textContent = "Generate";
+        } catch (e) {
+          go.disabled = false; go.textContent = "Generate";
+          status.textContent = (e && e.message) || "generation failed";
+        }
+      });
+      foot.append(cancel, go);
+      modal.appendChild(foot);
+    },
+  });
+}
+
+async function pollDocgen(jobId, status) {
+  const t0 = Date.now();
+  for (;;) {
+    let snap;
+    try { snap = await api("GET", `/repowise/docs/generate/${jobId}`); }
+    catch (e) { status.textContent = e.message; return; }
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (snap.status === "running") {
+      status.textContent = `Generating with ${snap.model}… ${secs}s (local, please wait)`;
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
+    if (snap.status === "done") {
+      status.textContent = "Docs generated ✓ — reloading dashboard";
+      toast("Docs generated");
+      const rw = rwState();
+      if (rw) { rw.blast = null; renderRepowise(); }
+      return;
+    }
+    status.textContent = (snap.error || "generation failed") + (snap.log_tail ? `\n${snap.log_tail.slice(-300)}` : "");
+    return;
+  }
 }
 
 async function rwRestart() {

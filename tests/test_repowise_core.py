@@ -536,6 +536,62 @@ def test_ingest_coverage_no_report_errors(tmp_path, monkeypatch):
         assert "no coverage report" in exc.message
 
 
+def test_list_ollama_models_parses_names(monkeypatch):
+    out = ("NAME             ID            SIZE    MODIFIED\n"
+           "qwen2.5:3b       357c53fb659c  1.9 GB  5 days ago\n"
+           "gemma4:latest    c6eb396dbd59  9.6 GB  6 weeks ago\n")
+    monkeypatch.setattr(rw, "_run", lambda argv, cwd=None: _RunOut(out=out))
+    assert rw.list_ollama_models() == ["qwen2.5:3b", "gemma4:latest"]
+
+
+class _NoThread:
+    def __init__(self, target=None, args=(), daemon=None):
+        pass
+
+    def start(self):
+        pass  # don't run the real `repowise init` subprocess in tests
+
+
+def test_start_docgen_defaults_to_first_installed_model(monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _LiveServe("/wt/hello-pr-9"))
+    monkeypatch.setattr(rw, "list_ollama_models", lambda: ["qwen2.5:3b", "gemma4:latest"])
+    monkeypatch.setattr(rw.threading, "Thread", _NoThread)
+    rw._docgens.clear()
+
+    job_id = rw.start_docgen("octo", "hello", None)  # blank → first model
+    snap = rw.get_docgen(job_id)
+    assert snap["model"] == "qwen2.5:3b"
+    assert snap["status"] == "running"
+
+
+def test_start_docgen_honors_explicit_model(monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _LiveServe("/wt/hello-pr-9"))
+    monkeypatch.setattr(rw, "list_ollama_models", lambda: ["qwen2.5:3b", "gemma4:latest"])
+    monkeypatch.setattr(rw.threading, "Thread", _NoThread)
+    job_id = rw.start_docgen("octo", "hello", "gemma4:latest")
+    assert rw.get_docgen(job_id)["model"] == "gemma4:latest"
+
+
+def test_start_docgen_errors_without_models(monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: _LiveServe("/wt/hello-pr-9"))
+    monkeypatch.setattr(rw, "list_ollama_models", lambda: [])
+    monkeypatch.setattr(rw.threading, "Thread", _NoThread)
+    try:
+        rw.start_docgen("octo", "hello", None)
+        assert False, "expected RepowiseError"
+    except rw.RepowiseError as exc:
+        assert "ollama models" in exc.message
+
+
+def test_start_docgen_errors_when_serve_down(monkeypatch):
+    monkeypatch.setattr(rw, "get_serve", lambda o, r: None)
+    try:
+        rw.start_docgen("octo", "hello", "qwen2.5:3b")
+        assert False, "expected RepowiseError"
+    except rw.RepowiseError as exc:
+        assert "not running" in exc.message
+
+
 def test_ensure_indexed_skips_when_wiki_db_present(tmp_path, monkeypatch):
     """wiki.db present → skipped True, NO init subprocess invoked at all."""
     repo = tmp_path / "clone"

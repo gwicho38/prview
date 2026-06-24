@@ -47,6 +47,9 @@ from prview.api_models import (
     BlastRadiusRequest,
     CoverageIngestModel,
     CoverageIngestRequest,
+    DocgenRequest,
+    DocgenSnapshot,
+    OllamaModelsModel,
     PrepareSnapshot,
     PRInfoModel,
     PRRefRequest,
@@ -383,6 +386,25 @@ def repowise_coverage(req: CoverageIngestRequest) -> CoverageIngestModel:
     # Ingest a coverage report so the dashboard's coverage panels populate.
     data = repowise.ingest_coverage(req.owner, req.repo, req.path)
     return CoverageIngestModel(**data)
+
+
+@app.get("/repowise/ollama-models", response_model=OllamaModelsModel)
+def repowise_ollama_models() -> OllamaModelsModel:
+    return OllamaModelsModel(models=repowise.list_ollama_models())
+
+
+@app.post("/repowise/docs/generate", response_model=JobIdResponse)
+def repowise_docs_generate(req: DocgenRequest) -> JobIdResponse:
+    # Generate the docs/wiki panel with a local ollama model (background job).
+    return JobIdResponse(job_id=repowise.start_docgen(req.owner, req.repo, req.model))
+
+
+@app.get("/repowise/docs/generate/{job_id}", response_model=DocgenSnapshot)
+def repowise_docs_generate_status(job_id: str) -> DocgenSnapshot:
+    snap = repowise.get_docgen(job_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail={"error": "unknown docgen job"})
+    return DocgenSnapshot(**snap)
 
 
 # --- Static assets ------------------------------------------------------------

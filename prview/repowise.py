@@ -669,6 +669,112 @@ def ingest_coverage(owner: str, repo: str, coverage_path: str | None = None) -> 
     return {"ok": True, "files": int(m.group(1)) if m else 0, "path": path}
 
 
+# ===========================================================================
+# Docs generation — populate the dashboard's docs/wiki panel with a LOCAL
+# ollama model (no cloud cost). repowise's ollama default (llama3.2) is usually
+# not pulled, so the model is chosen from `ollama list`. Long-running → a
+# background daemon-thread job with a pollable snapshot.
+# ===========================================================================
+
+_DOCGEN_LOG_DIR = Path.home() / ".prview" / "docgen-logs"
+
+
+def list_ollama_models() -> list[str]:
+    """Installed ollama model names (first column of `ollama list`)."""
+    result = _run(["ollama", "list"])
+    if result.returncode != 0:
+        return []
+    lines = result.stdout.strip().splitlines()[1:]  # drop the header row
+    return [ln.split()[0] for ln in lines if ln.strip()]
+
+
+@dataclass
+class DocgenJob:
+    id: str
+    owner: str
+    repo: str
+    model: str
+    worktree: str
+    status: str = "running"  # running | done | error
+    started_at: float = 0.0
+    error: str | None = None
+    log_tail: str | None = None
+    logfile: str = ""
+
+
+_docgens: dict[str, DocgenJob] = {}
+_docgens_lock = threading.Lock()
+
+
+def _run_docgen(job: DocgenJob) -> None:
+    _DOCGEN_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    job.logfile = str(_DOCGEN_LOG_DIR / f"{job.owner}-{job.repo}-{job.id}.log")
+    # Full LLM page-gen (no --index-only) via local ollama. mock embedder avoids
+    # needing a pulled embedding model — docs pages come from the LLM provider.
+    env = dict(os.environ)
+    env["REPOWISE_PROVIDER"] = "ollama"
+    env["REPOWISE_MODEL"] = job.model
+    env.setdefault("REPOWISE_EMBEDDER", "mock")
+    # The ollama provider treats OLLAMA_BASE_URL as required (warns + skips
+    # generation otherwise); default it to the standard local daemon.
+    env.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
+    try:
+        with open(job.logfile, "w") as fh:
+            result = subprocess.run(
+                ["repowise", "init", job.worktree, "--yes", "--force",
+                 "--provider", "ollama", "--model", job.model, "--no-workspace"],
+                cwd=job.worktree, env=env, stdout=fh, stderr=subprocess.STDOUT, text=True,
+            )
+        if result.returncode == 0:
+            job.status = "done"
+        else:
+            job.status = "error"
+            job.error = "repowise doc generation failed"
+            job.log_tail = _read_tail(job.logfile)
+    except FileNotFoundError:
+        job.status = "error"
+        job.error = "`repowise` not found"
+    except Exception as exc:  # never leak a stack to the poller
+        job.status = "error"
+        job.error = str(exc)
+        job.log_tail = _read_tail(job.logfile)
+
+
+def start_docgen(owner: str, repo: str, model: str | None = None) -> str:
+    serve = get_serve(owner, repo)
+    if serve is None or serve._proc is None or serve._proc.poll() is not None:
+        raise RepowiseError(
+            "repowise serve is not running",
+            hint="open the Repowise tab to prepare this PR first",
+        )
+    chosen = model or next(iter(list_ollama_models()), None)
+    if not chosen:
+        raise RepowiseError(
+            "no local ollama models found",
+            hint="pull one first, e.g. `ollama pull qwen2.5:3b`",
+        )
+    job = DocgenJob(id=str(uuid.uuid4()), owner=owner, repo=repo,
+                    model=chosen, worktree=serve.repo_path, started_at=time.time())
+    with _docgens_lock:
+        _docgens[job.id] = job
+    threading.Thread(target=_run_docgen, args=(job,), daemon=True).start()
+    return job.id
+
+
+def get_docgen(job_id: str) -> dict | None:
+    with _docgens_lock:
+        job = _docgens.get(job_id)
+    if job is None:
+        return None
+    return {
+        "status": job.status,
+        "elapsed": time.time() - job.started_at,
+        "model": job.model,
+        "error": job.error,
+        "log_tail": job.log_tail,
+    }
+
+
 def stop_serve(owner: str, repo: str) -> bool:
     """Terminate a repo's serve child and drop its registry entry."""
     key = f"{owner}/{repo}"

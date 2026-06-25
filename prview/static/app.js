@@ -875,13 +875,29 @@ function hydrateAi(path) {
   } catch { /* corrupt/unavailable storage → start fresh */ }
 }
 
+const MAX_ASKS_CACHED = 15;  // bound a single PR's cache; older Q/A drop off
+
 function persistAi(path) {
+  const ai = State.ai[path];
+  const key = aiCacheKey();
+  const write = () => {
+    const blob = JSON.parse(localStorage.getItem(key) || "{}");
+    blob[path] = { results: ai.results, asks: ai.asks.slice(-MAX_ASKS_CACHED) };
+    localStorage.setItem(key, JSON.stringify(blob));
+  };
   try {
-    const ai = State.ai[path];
-    const blob = JSON.parse(localStorage.getItem(aiCacheKey()) || "{}");
-    blob[path] = { results: ai.results, asks: ai.asks };
-    localStorage.setItem(aiCacheKey(), JSON.stringify(blob));
-  } catch { /* quota/unavailable → cache is best-effort */ }
+    write();
+  } catch {
+    // Likely a quota hit from other PRs' caches accumulating. Drop every other
+    // prview:ai:* key (this PR's cache is the one that matters) and retry once.
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("prview:ai:") && k !== key) localStorage.removeItem(k);
+      }
+      write();
+    } catch { /* still failing → cache is best-effort, give up silently */ }
+  }
 }
 
 function isCurrent(path) { return currentFile() && currentFile().filename === path; }

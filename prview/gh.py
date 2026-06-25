@@ -175,6 +175,26 @@ def pr_head_sha(owner: str, repo: str, number: int) -> str:
     return result.stdout.strip()
 
 
+def fetch_file_at_ref(owner: str, repo: str, path: str, ref: str) -> str:
+    """Return the full text of a file at a git ref (the PR head), for the
+    whole-file view. Uses the raw contents API; a binary/oversize blob or a
+    deleted file surfaces a GhError the caller turns into an actionable note.
+    """
+    # `ref` is a GET query param — passing it as a -f field makes gh issue a
+    # POST-shaped request and 404. Put it in the path; -X GET keeps it a read.
+    result = _run(
+        ["gh", "api", "-X", "GET",
+         f"repos/{owner}/{repo}/contents/{path}?ref={ref}",
+         "-H", "Accept: application/vnd.github.raw+json"],
+    )
+    if result.returncode != 0:
+        raise GhError(
+            f"Failed to fetch file: {result.stderr.strip()}",
+            hint="the file may be binary, too large, or absent at the PR head",
+        )
+    return result.stdout
+
+
 def post_pr_review_comment(
     owner: str, repo: str, number: int, path: str, text: str, commit_id: str,
     line: int, side: str = "RIGHT", start_line: int | None = None,

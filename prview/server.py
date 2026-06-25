@@ -35,6 +35,7 @@ from prview.api_models import (
     CommentRequest,
     ExplainSelectionRequest,
     FileDetail,
+    FullFileModel,
     FileListItem,
     FileTarget,
     FlagRequest,
@@ -173,6 +174,16 @@ def get_file(owner: str, repo: str, n: int, path: str) -> FileDetail:
         viewed=fd.viewed,
         diff_text=fd.diff_text,
     )
+
+
+@app.get("/pr/{owner}/{repo}/{n}/file/full", response_model=FullFileModel)
+def get_file_full(owner: str, repo: str, n: int, path: str) -> FullFileModel:
+    # Whole-file view: the file at the PR head + the new-side line numbers this
+    # PR added (so the client can highlight them). Diff lines come from the cache.
+    _, fd = _cached_file(owner, repo, n, path)
+    sha = gh.pr_head_sha(owner, repo, n)
+    content = gh.fetch_file_at_ref(owner, repo, path, sha)
+    return FullFileModel(content=content, added_lines=core.added_line_numbers(fd.diff_text))
 
 
 # --- AI jobs (async: only touches in-memory registry) -------------------------

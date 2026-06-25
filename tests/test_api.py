@@ -269,3 +269,34 @@ def test_state_and_reviews(client, monkeypatch):
     assert rl.status_code == 200
     rows = rl.json()
     assert any(row["owner"] == "octo" and row["number"] == 7 for row in rows)
+
+
+def test_file_full_returns_content_and_added_lines(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "headsha")
+    captured = {}
+
+    def fake_fetch(o, r, path, ref):
+        captured.update(path=path, ref=ref)
+        return "line1\nline2\nline3\n"
+
+    monkeypatch.setattr(gh, "fetch_file_at_ref", fake_fetch)
+    resp = client.get("/pr/octo/hello/7/file/full", params={"path": "big.py"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["content"] == "line1\nline2\nline3\n"
+    assert captured == {"path": "big.py", "ref": "headsha"}
+    assert isinstance(body["added_lines"], list)  # parsed from the cached diff
+
+
+def test_file_full_surfaces_gh_error(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "headsha")
+
+    def boom(o, r, path, ref):
+        raise gh.GhError("Failed to fetch file", hint="binary or too large")
+
+    monkeypatch.setattr(gh, "fetch_file_at_ref", boom)
+    resp = client.get("/pr/octo/hello/7/file/full", params={"path": "big.py"})
+    assert resp.status_code == 400
+    assert "Failed to fetch file" in resp.json()["error"]

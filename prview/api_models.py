@@ -168,6 +168,11 @@ class FileDetail(FileListItem):
     diff_text: str
 
 
+class FullFileModel(BaseModel):
+    content: str
+    added_lines: list[int] = []  # new-side line numbers this PR added
+
+
 class ReviewStateModel(BaseModel):
     viewed: list[str] = []
     flagged: dict[str, str] = {}

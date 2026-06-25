@@ -175,6 +175,35 @@ refInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitRef()
 refInput.addEventListener("input", () => setRefError(""));
 document.getElementById("brand").addEventListener("click", () => show("landing"));
 
+// ---- theme (light / dark) -------------------------------------------------
+// Dark is the default; the choice persists in localStorage. Applying a theme
+// only swaps the data-theme attribute — every component re-themes via CSS vars —
+// and re-renders the open diff so diff2html's palette matches.
+const THEME_KEY = "prview:theme";
+function currentTheme() { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; }
+function applyTheme(theme) {
+  if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.textContent = theme === "light" ? "🌙" : "☀";
+}
+function setTheme(theme) {
+  applyTheme(theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* best-effort */ }
+  // Re-render the open diff so its palette follows the theme.
+  const f = currentFile && State.files && State.files.length ? currentFile() : null;
+  const region = document.getElementById("diff-region");
+  if (f && region && State.detailCache[f.filename]) renderDiff(State.detailCache[f.filename], region);
+}
+(function initTheme() {
+  let saved;
+  try { saved = localStorage.getItem(THEME_KEY); } catch { saved = null; }
+  const prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+  applyTheme(saved || (prefersLight ? "light" : "dark"));
+})();
+document.getElementById("theme-toggle").addEventListener("click",
+  () => setTheme(currentTheme() === "light" ? "dark" : "light"));
+
 async function loadResumeList() {
   const list = document.getElementById("resume-list");
   list.innerHTML = "";
@@ -671,7 +700,7 @@ function renderDiff(detail, region) {
       // side-by-side with one empty placeholder row per added line, producing a
       // huge blank column. Line-by-line keeps it compact with no wasted space.
       outputFormat: "line-by-line",
-      colorScheme: "dark",      // GitHub-dark palette (matches app theme) — readable contrast
+      colorScheme: currentTheme(),  // follow the app's light/dark theme
       highlight: false,         // vendored ui-base bundle has no highlight.js; would throw
     });
     ui.draw();

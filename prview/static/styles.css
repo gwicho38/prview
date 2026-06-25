@@ -253,6 +253,9 @@ a { color: var(--accent); }
 }
 .pr-summary .ps-title { font-size: 15px; font-weight: 600; }
 .pr-summary .ps-title .ps-ref { color: var(--fg-muted); font-family: var(--mono); font-weight: 400; }
+.pr-summary .ps-title a.ps-ref-link { text-decoration: none; cursor: pointer; }
+.pr-summary .ps-title a.ps-ref-link:hover { color: var(--accent); text-decoration: underline; }
+.pr-summary .ps-title a.ps-ref-link::after { content: " \2197"; font-size: 0.85em; opacity: 0.7; }
 .pr-summary .ps-meta { color: var(--fg-muted); font-family: var(--mono); font-size: 13px; }
 .pr-summary .ps-meta .ps-branch { color: var(--fg); }
 .pr-summary .ps-status-row { display: flex; align-items: center; gap: 22px; margin-top: 4px; font-family: var(--mono); font-size: 13px; }

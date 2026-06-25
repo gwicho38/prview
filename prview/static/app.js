@@ -89,6 +89,11 @@ function refString() {
   return `${owner}/${repo}#${number}`;
 }
 
+function prUrl() {
+  const { owner, repo, number } = State.pr;
+  return `https://github.com/${owner}/${repo}/pull/${number}`;
+}
+
 // ----------------------------------------------------------------------------
 // Router — toggles the three screens.
 // ----------------------------------------------------------------------------
@@ -373,10 +378,15 @@ function renderSummary() {
   const title = document.createElement("div");
   title.className = "ps-title";
   title.append(drawerBtn);
-  const ref = document.createElement("span");
-  ref.className = "ps-ref";
-  ref.textContent = ` ${refString()}  ·  `;
-  title.append(ref, document.createTextNode(pr.title || "(untitled)"));
+  // The ref links to the PR on GitHub (new tab) so reviewers can jump out.
+  const ref = document.createElement("a");
+  ref.className = "ps-ref ps-ref-link";
+  ref.href = prUrl();
+  ref.target = "_blank";
+  ref.rel = "noopener noreferrer";
+  ref.title = "Open this PR on GitHub";
+  ref.textContent = refString();
+  title.append(ref, document.createTextNode("  ·  "), document.createTextNode(pr.title || "(untitled)"));
 
   const meta = document.createElement("div");
   meta.className = "ps-meta";
@@ -649,7 +659,23 @@ function renderFileDetail() {
 
   if ((State.viewMode || "diff") === "full") loadFullFile(f.filename, diffRegion);
   else loadDiff(f.filename, diffRegion);
-  startSummary(f.filename, false); // auto-submit summary on select
+  scheduleAutoSummary(f.filename);
+}
+
+// Auto-summary fires only if the reviewer stays on the file >3s, so flipping
+// through files doesn't spawn a claude job per file. A cached summary still
+// shows instantly; the timer is cleared whenever the file detail re-renders
+// (navigation), and the launch is gated on still being the current file.
+let _autoSummaryTimer = null;
+const AUTO_SUMMARY_DELAY_MS = 3000;
+function scheduleAutoSummary(path) {
+  if (_autoSummaryTimer) { clearTimeout(_autoSummaryTimer); _autoSummaryTimer = null; }
+  const ai = aiFor(path);
+  if (ai.results.summary || ai.status === "running") { startSummary(path, false); return; } // cached/in-flight → show now
+  _autoSummaryTimer = setTimeout(() => {
+    _autoSummaryTimer = null;
+    if (isCurrent(path)) startSummary(path, false);
+  }, AUTO_SUMMARY_DELAY_MS);
 }
 
 function buildActionBar(f) {
@@ -2452,8 +2478,8 @@ document.addEventListener("keydown", (e) => {
   if (diffSelection()) return; // user is selecting diff text — don't navigate/act
 
   switch (e.key) {
-    case "j": e.preventDefault(); navTo(1); break;
-    case "k": e.preventDefault(); navTo(-1); break;
+    case "j": case "n": e.preventDefault(); navTo(1); break;   // next file
+    case "k": case "p": e.preventDefault(); navTo(-1); break;  // previous file
     case "b": e.preventDefault(); navTo(-1); break;
     case "v": e.preventDefault(); markViewed(); break;
     case "e": e.preventDefault(); startExplain(currentFile().filename); break;

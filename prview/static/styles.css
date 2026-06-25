@@ -348,7 +348,9 @@ a { color: var(--accent); }
 }
 .ai-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .ai-head .ai-title { font-family: var(--mono); font-size: 13px; color: var(--fg-muted); }
-.ai-body { font-size: 13.5px; line-height: 1.55; }
+/* Long AI responses scroll inside the panel instead of pushing the diff down. */
+.ai-body { font-size: 13.5px; line-height: 1.55; max-height: 320px; overflow-y: auto; }
+.ai-qa { max-height: 280px; overflow-y: auto; }
 .ai-body p { margin: 0 0 10px; }
 .ai-body > :last-child { margin-bottom: 0; }
 .ai-body ul { margin: 0 0 10px; padding-left: 20px; }

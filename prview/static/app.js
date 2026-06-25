@@ -813,25 +813,59 @@ initSelExplain();
 const POLL_MS = 2000;
 const MAX_NOTE = "may take up to 5 min";
 
+// Per-path AI state. Results are cached per mode (summary/explain) plus an ask
+// history, so toggling between them never re-runs a job and never shows another
+// mode's text. Cached results persist to localStorage keyed by the PR ref, so
+// revisiting a file — or reopening the PR — restores them without a re-call.
 function aiFor(path) {
-  if (!State.ai[path]) State.ai[path] = { mode: "summary", status: "idle", jobId: null, result: "", qa: null };
+  if (!State.ai[path]) {
+    State.ai[path] = {
+      mode: "summary", status: "idle", jobId: null,
+      results: {}, asks: [],
+    };
+    hydrateAi(path);
+  }
   return State.ai[path];
+}
+
+function aiCacheKey() {
+  const { owner, repo, number } = prKey();
+  return `prview:ai:${owner}/${repo}#${number}`;
+}
+
+function hydrateAi(path) {
+  try {
+    const blob = JSON.parse(localStorage.getItem(aiCacheKey()) || "{}");
+    const saved = blob[path];
+    if (saved) {
+      const ai = State.ai[path];
+      ai.results = saved.results || {};
+      ai.asks = saved.asks || [];
+      if (ai.results.summary) ai.status = "done";
+    }
+  } catch { /* corrupt/unavailable storage → start fresh */ }
+}
+
+function persistAi(path) {
+  try {
+    const ai = State.ai[path];
+    const blob = JSON.parse(localStorage.getItem(aiCacheKey()) || "{}");
+    blob[path] = { results: ai.results, asks: ai.asks };
+    localStorage.setItem(aiCacheKey(), JSON.stringify(blob));
+  } catch { /* quota/unavailable → cache is best-effort */ }
 }
 
 function isCurrent(path) { return currentFile() && currentFile().filename === path; }
 
 function startSummary(path, force) {
   const ai = aiFor(path);
-  if (!force && ai.status === "done" && ai.mode === "summary" && ai.result) {
-    renderAiPanel(path);
-    return;
-  }
-  if (!force && ai.status === "running" && ai.mode === "summary") {
-    renderAiPanel(path);
-    return;
-  }
   ai.mode = "summary";
-  ai.qa = null;
+  // Cache hit (or already running) → just show it, never re-run.
+  if (!force && (ai.results.summary || (ai.status === "running" && ai.runningMode === "summary"))) {
+    if (ai.results.summary) ai.status = "done";
+    renderAiPanel(path);
+    return;
+  }
   launchJob(path, "/ai/summary", { ...prKey(), path });
 }
 
@@ -839,6 +873,8 @@ function startExplain(path) {
   const ai = aiFor(path);
   ai.prevMode = ai.mode;
   ai.mode = "explain";
+  // Cached explain → show without re-calling.
+  if (ai.results.explain) { ai.status = "done"; renderAiPanel(path); return; }
   launchJob(path, "/ai/explain", { ...prKey(), path });
 }
 
@@ -853,6 +889,7 @@ function startAsk(path, question) {
 async function launchJob(path, endpoint, body) {
   const ai = aiFor(path);
   ai.status = "running";
+  ai.runningMode = ai.mode;
   ai.error = "";
   ai.t0 = Date.now();
   if (isCurrent(path)) renderAiPanel(path);
@@ -897,8 +934,9 @@ function pollJob(path) {
     onDone: (snap) => {
       ai.elapsed = snap.elapsed;
       ai.status = "done";
-      if (ai.mode === "ask") ai.qa = { q: ai.question, a: snap.result || "" };
-      else ai.result = snap.result || "";
+      if (ai.runningMode === "ask") ai.asks.push({ q: ai.question, a: snap.result || "" });
+      else ai.results[ai.runningMode] = snap.result || "";
+      persistAi(path);
       if (isCurrent(path)) renderAiPanel(path);
       announce("AI response ready");
     },
@@ -916,7 +954,8 @@ async function cancelJob(path) {
   const ai = aiFor(path);
   if (ai.timer) clearTimeout(ai.timer);
   const jobId = ai.jobId;
-  ai.status = ai.result || ai.qa ? "done" : "idle"; // return to prior resting state
+  // Return to a resting state showing whatever is already cached.
+  ai.status = (ai.results.summary || ai.results.explain || ai.asks.length) ? "done" : "idle";
   ai.mode = ai.prevMode || "summary";
   if (isCurrent(path)) renderAiPanel(path);
   if (jobId) { try { await api("POST", `/job/${jobId}/cancel`); } catch { /* best-effort */ } }
@@ -962,6 +1001,21 @@ function renderAiPanel(path) {
     toggle.addEventListener("click", () => { ai.mode = "summary"; renderAiPanel(path); });
   }
   head.appendChild(toggle);
+
+  // Refresh: cached results never auto-bust (e.g. after a new commit), so offer
+  // a one-click re-run of the current mode.
+  const cachedNow = ai.mode === "explain" ? ai.results.explain : ai.results.summary;
+  if (ai.status !== "running" && cachedNow) {
+    const refresh = document.createElement("button");
+    refresh.className = "btn btn-ghost";
+    refresh.title = "Re-run (ignore cached result)";
+    refresh.textContent = "↻";
+    refresh.addEventListener("click", () => {
+      if (ai.mode === "explain") { ai.results.explain = ""; startExplain(path); }
+      else startSummary(path, true);
+    });
+    head.appendChild(refresh);
+  }
   el.appendChild(head);
 
   // State A — loading
@@ -997,25 +1051,27 @@ function renderAiPanel(path) {
     return;
   }
 
-  // State B / C — result
+  // State B / C — result. Summary/explain read their own cached buffer so a
+  // toggle shows the right text without a re-run.
   const body = document.createElement("div");
   body.className = "ai-body";
-  const resultText = ai.result || (ai.mode === "summary" && ai.status === "idle" ? "Loading summary…" : "");
+  const cached = ai.mode === "explain" ? ai.results.explain : ai.results.summary;
+  const resultText = cached || (ai.mode === "summary" && ai.status === "idle" ? "Loading summary…" : "");
   renderMarkdown(body, resultText);
   el.appendChild(body);
 
-  // Ask Q/A block (State C) shown beneath whatever body we have.
-  if (ai.qa) {
+  // Ask Q/A history (State C) shown beneath, newest last.
+  for (const qa of ai.asks) {
     el.appendChild(divider());
-    const qa = document.createElement("div");
-    qa.className = "ai-qa";
+    const block = document.createElement("div");
+    block.className = "ai-qa";
     const q = document.createElement("div");
     q.className = "ai-q";
-    q.textContent = `Q: ${ai.qa.q}`;
+    q.textContent = `Q: ${qa.q}`;
     const a = document.createElement("div");
-    renderMarkdown(a, ai.qa.a || "");
-    qa.append(q, a);
-    el.appendChild(qa);
+    renderMarkdown(a, qa.a || "");
+    block.append(q, a);
+    el.appendChild(block);
   }
 
   // Ask input (State B): always available once we have a resting panel.

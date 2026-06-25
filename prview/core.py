@@ -201,13 +201,27 @@ def parse_diff(raw: str) -> list[FileDiff]:
 # Prompt builders (pure)
 # ---------------------------------------------------------------------------
 
+# The AI backend is the `claude` CLI (Claude Code), which has a very large
+# context window, so we send the WHOLE file diff. The old per-prompt cuts
+# (4000 / 8000 chars, inherited from the mcli CLI) silently hid most of a large
+# file from the model — it would then answer about, or flag, a "truncated" diff
+# even though prview renders the file in full. We only clip pathological diffs,
+# and when we do we say so explicitly so the model never has to guess.
+_DIFF_LIMIT = 200_000
+
+
+def _clip_diff(diff_text: str) -> str:
+    if len(diff_text) <= _DIFF_LIMIT:
+        return diff_text
+    return diff_text[:_DIFF_LIMIT] + f"\n\n[... diff truncated at {_DIFF_LIMIT} characters ...]"
+
+
 def build_summary_prompt(pr: PRInfo, fd: FileDiff) -> str:
     """Assemble the 1-2 sentence file-summary prompt (src 367-380)."""
-    diff_preview = fd.diff_text[:4000]
     return (
         f"PR: {pr.title} by {pr.author}\n"
         f"File: {fd.filename} (+{fd.additions} -{fd.deletions})\n"
-        f"Diff:\n```diff\n{diff_preview}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
         "In 1-2 sentences, summarize what changed in this file and why. Be direct."
     )
 
@@ -218,7 +232,7 @@ def build_explain_prompt(pr: PRInfo, fd: FileDiff) -> str:
         f"You are a code reviewer.\n\n"
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{fd.diff_text[:8000]}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
         f"Explain the code in this file. Focus on:\n"
         f"- What does this file do? What is its role in the codebase?\n"
         f"- Walk through the key functions, classes, or data structures line by line\n"
@@ -236,9 +250,13 @@ def build_ask_prompt(pr: PRInfo, fd: FileDiff, question: str) -> str:
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n"
         f"Description: {pr.body[:1000]}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{fd.diff_text[:8000]}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
         f"User question: {question}\n\n"
-        f"Answer concisely based on the diff and PR context."
+        f"If the question references something specific — a symbol, function, "
+        f"class, file, or line — treat that reference as the anchor: start there "
+        f"and expand outward through the surrounding and related code as far as "
+        f"needed to answer completely, unless the user explicitly scopes it "
+        f"otherwise. Answer concisely based on the diff and PR context."
     )
 
 
@@ -248,7 +266,7 @@ def build_explain_selection_prompt(pr: PRInfo, fd: FileDiff, selection: str) -> 
         f"You are a code reviewer.\n\n"
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{fd.diff_text[:8000]}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
         f"The reviewer highlighted this specific snippet:\n```\n{selection[:2000]}\n```\n\n"
         f"Explain only this snippet, in the context of the file and diff above: what it "
         f"does, how it works mechanically, and why the change matters. Be concise and "

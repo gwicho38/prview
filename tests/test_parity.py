@@ -79,31 +79,58 @@ def _fd(diff="diff body\n"):
 
 # --- 1-3: prompt byte-for-byte parity, EXPECTED extracted from CLI source -----
 
+# Structural parity is asserted on a SHORT diff (under every limit → the CLI and
+# prview both embed it whole), so these still guard the prompt scaffolding from
+# drift. prview INTENTIONALLY diverges from the CLI's tiny diff cuts (4000/8000
+# chars): the claude CLI backend has a large context window, so we send the whole
+# file — the old cuts hid most of a large file and made the model report a
+# "truncated" diff the UI was actually rendering in full. The divergence is
+# asserted explicitly below.
+_SHORT_DIFF = "small diff body\n"
+
+
 def test_summary_prompt_matches_cli_source():
-    pr, fd = _pr(), _fd(diff="d" * 9000)  # exercises the 4000-char preview cut
+    pr, fd = _pr(), _fd(diff=_SHORT_DIFF)
     (src_fstring,) = _prompt_fstrings("summarize_file_change")
-    expected = _eval_source_prompt(src_fstring, pr=pr, fd=fd)
-    assert core.build_summary_prompt(pr, fd) == expected
-    assert "d" * 4000 in expected and "d" * 4001 not in expected  # 4000 cut is the CLI's
+    assert core.build_summary_prompt(pr, fd) == _eval_source_prompt(src_fstring, pr=pr, fd=fd)
 
 
 def test_explain_prompt_matches_cli_source():
-    pr, fd = _pr(), _fd(diff="e" * 12000)  # exercises the 8000-char cut
+    pr, fd = _pr(), _fd(diff=_SHORT_DIFF)
     explain_src, _ask_src = _prompt_fstrings("review_loop")
-    expected = _eval_source_prompt(explain_src, pr=pr, fd=fd)
-    assert core.build_explain_prompt(pr, fd) == expected
-    assert "e" * 8000 in expected and "e" * 8001 not in expected
+    assert core.build_explain_prompt(pr, fd) == _eval_source_prompt(explain_src, pr=pr, fd=fd)
 
 
-def test_ask_prompt_matches_cli_source_with_body_and_diff_truncation():
-    pr, fd = _pr(), _fd(diff="z" * 12000)
+def test_ask_prompt_keeps_cli_scaffolding_and_body_cap():
+    # The ask prompt intentionally adds a reference-anchor instruction the CLI
+    # lacks, so it is no longer byte-for-byte equal. Assert the CLI's shared
+    # scaffolding (header, file, diff, question, body[:1000] cap) is preserved.
+    pr, fd = _pr(), _fd(diff=_SHORT_DIFF)
     _explain_src, ask_src = _prompt_fstrings("review_loop")
     question = "Why this approach?"
-    expected = _eval_source_prompt(ask_src, pr=pr, fd=fd, question=question)
-    assert core.build_ask_prompt(pr, fd, question) == expected
-    # body[:1000] and diff[:8000] limits come from the CLI source, not us.
-    assert "B" * 1000 in expected and "B" * 1001 not in expected
-    assert "z" * 8000 in expected and "z" * 8001 not in expected
+    cli = _eval_source_prompt(ask_src, pr=pr, fd=fd, question=question)
+    head, _, _ = cli.partition("Answer concisely")  # everything up to the CLI's closer
+    out = core.build_ask_prompt(pr, fd, question)
+    assert head in out                                   # shared scaffolding intact
+    assert "B" * 1000 in out and "B" * 1001 not in out   # body cap still enforced
+    assert "treat that reference as the anchor" in out   # our added steer
+
+
+def test_prompts_send_full_diff_not_the_cli_cuts():
+    """Divergence guard: large diffs reach the model in full (old 4000/8000 cuts
+    hid most of the file), and only a pathological diff is clipped — with an
+    explicit marker so the model never has to guess that it was truncated."""
+    pr, fd = _pr(), _fd(diff="d" * 30000)  # over both old cuts, under the new limit
+    for prompt in (core.build_summary_prompt(pr, fd),
+                   core.build_explain_prompt(pr, fd),
+                   core.build_ask_prompt(pr, fd, "q")):
+        assert "d" * 30000 in prompt          # whole diff present, not cut at 4000/8000
+        assert "truncated" not in prompt       # nothing hidden → no marker
+
+    huge = _fd(diff="x" * (core._DIFF_LIMIT + 5000))
+    clipped = core.build_explain_prompt(pr, huge)
+    assert f"truncated at {core._DIFF_LIMIT} characters" in clipped
+    assert "x" * core._DIFF_LIMIT in clipped
 
 
 # --- 4: full state round-trip incl. `submitted`, schema confirmed -------------

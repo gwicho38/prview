@@ -1,6 +1,7 @@
 from prview.core import (
     FileDiff,
     PRInfo,
+    _DIFF_LIMIT,
     build_ask_prompt,
     build_explain_prompt,
     build_explain_selection_prompt,
@@ -30,22 +31,13 @@ def _fd(diff_text="diff body\n"):
 
 def test_summary_prompt_byte_for_byte():
     pr, fd = _pr(), _fd()
-    diff_preview = fd.diff_text[:4000]
     expected = (
         f"PR: {pr.title} by {pr.author}\n"
         f"File: {fd.filename} (+{fd.additions} -{fd.deletions})\n"
-        f"Diff:\n```diff\n{diff_preview}\n```\n\n"
+        f"Diff:\n```diff\n{fd.diff_text}\n```\n\n"
         "In 1-2 sentences, summarize what changed in this file and why. Be direct."
     )
     assert build_summary_prompt(pr, fd) == expected
-
-
-def test_summary_prompt_truncates_diff_to_4000():
-    pr = _pr()
-    fd = _fd(diff_text="x" * 9000)
-    prompt = build_summary_prompt(pr, fd)
-    assert "x" * 4000 in prompt
-    assert "x" * 4001 not in prompt
 
 
 def test_explain_prompt_byte_for_byte():
@@ -54,7 +46,7 @@ def test_explain_prompt_byte_for_byte():
         f"You are a code reviewer.\n\n"
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{fd.diff_text[:8000]}\n```\n\n"
+        f"Diff:\n```diff\n{fd.diff_text}\n```\n\n"
         f"Explain the code in this file. Focus on:\n"
         f"- What does this file do? What is its role in the codebase?\n"
         f"- Walk through the key functions, classes, or data structures line by line\n"
@@ -66,37 +58,41 @@ def test_explain_prompt_byte_for_byte():
     assert build_explain_prompt(pr, fd) == expected
 
 
-def test_explain_prompt_truncates_diff_to_8000():
-    pr = _pr()
-    fd = _fd(diff_text="y" * 12000)
-    prompt = build_explain_prompt(pr, fd)
-    assert "y" * 8000 in prompt
-    assert "y" * 8001 not in prompt
-
-
-def test_ask_prompt_byte_for_byte():
+def test_ask_prompt_includes_full_diff_body_cap_and_anchor_steer():
     pr, fd = _pr(), _fd()
     question = "Why this approach?"
-    expected = (
-        f"You are reviewing a pull request.\n\n"
-        f"PR: {pr.title} (#{pr.number}) by {pr.author}\n"
-        f"Description: {pr.body[:1000]}\n\n"
-        f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{fd.diff_text[:8000]}\n```\n\n"
-        f"User question: {question}\n\n"
-        f"Answer concisely based on the diff and PR context."
-    )
-    assert build_ask_prompt(pr, fd, question) == expected
+    prompt = build_ask_prompt(pr, fd, question)
+    assert f"Description: {pr.body[:1000]}\n\n" in prompt   # body still capped at 1000
+    assert f"Diff:\n```diff\n{fd.diff_text}\n```\n\n" in prompt
+    assert f"User question: {question}" in prompt
+    # The reference-anchor steer the user asked for.
+    assert "treat that reference as the anchor" in prompt
 
 
-def test_ask_prompt_truncates_body_to_1000_and_diff_to_8000():
+def test_prompts_send_full_diff_not_old_cuts():
+    """The 4000/8000-char cuts are gone: a large file reaches the model whole."""
     pr = _pr()
-    fd = _fd(diff_text="z" * 12000)
+    fd = _fd("x" * 30000)  # over both old cuts, under the new limit
+    for prompt in (build_summary_prompt(pr, fd), build_explain_prompt(pr, fd),
+                   build_ask_prompt(pr, fd, "q"), build_explain_selection_prompt(pr, fd, "s")):
+        assert "x" * 30000 in prompt
+        assert "truncated" not in prompt
+
+
+def test_prompts_clip_pathological_diff_with_explicit_marker():
+    pr = _pr()
+    fd = _fd("z" * (_DIFF_LIMIT + 5000))
+    prompt = build_explain_prompt(pr, fd)
+    assert "z" * _DIFF_LIMIT in prompt
+    assert f"truncated at {_DIFF_LIMIT} characters" in prompt
+
+
+def test_ask_prompt_truncates_body_to_1000():
+    pr = _pr()
+    fd = _fd(diff_text="z" * 200)
     prompt = build_ask_prompt(pr, fd, "q")
     assert "B" * 1000 in prompt
     assert "B" * 1001 not in prompt
-    assert "z" * 8000 in prompt
-    assert "z" * 8001 not in prompt
 
 
 def test_explain_selection_prompt_includes_snippet_and_context():
@@ -109,9 +105,9 @@ def test_explain_selection_prompt_includes_snippet_and_context():
     assert "only this snippet" in prompt
 
 
-def test_explain_selection_prompt_caps_selection_and_diff():
+def test_explain_selection_prompt_caps_selection_only():
     pr = _pr()
     fd = _fd("z" * 9000)
     prompt = build_explain_selection_prompt(pr, fd, "s" * 3000)
-    assert "s" * 2000 in prompt and "s" * 2001 not in prompt   # selection capped at 2000
-    assert "z" * 8000 in prompt and "z" * 8001 not in prompt   # diff capped at 8000
+    assert "s" * 2000 in prompt and "s" * 2001 not in prompt   # selection still capped at 2000
+    assert "z" * 9000 in prompt                                # diff now sent in full

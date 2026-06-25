@@ -18,6 +18,26 @@
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* Light theme — GitHub-light palette. Applied when <html data-theme="light">;
+   only the color tokens are overridden, so every component re-themes for free. */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elev: #f6f8fa;
+  --bg-elev-2: #eaeef2;
+  --border: #d0d7de;
+  --border-strong: #afb8c1;
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --fg-dim: #818b96;
+  --accent: #0969da;
+  --accent-fg: #ffffff;
+  --green: #1a7f37;
+  --red: #cf222e;
+  --yellow: #9a6700;
+  --flag: #bc4c00;
+  --focus: #0969da;
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -79,6 +99,18 @@ a { color: var(--accent); }
   font-size: 12px;
   color: var(--fg-muted);
 }
+.appbar-right { display: inline-flex; align-items: center; gap: 12px; }
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+.theme-toggle:hover { color: var(--fg); border-color: var(--border-strong); }
 
 .screen { flex: 1 1 auto; overflow: auto; min-height: 0; }
 .screen[hidden] { display: none; }

@@ -592,6 +592,25 @@ def test_start_docgen_errors_when_serve_down(monkeypatch):
         assert "not running" in exc.message
 
 
+def test_cancel_docgen_terminates_running_job(monkeypatch):
+    rw._docgens.clear()
+    killed = []
+    monkeypatch.setattr(rw, "_terminate_proc", lambda p: killed.append(p))
+    proc = object()
+    job = rw.DocgenJob(id="d1", owner="o", repo="r", model="qwen2.5:3b",
+                       worktree="/wt", status="running")
+    job._proc = proc
+    rw._docgens["d1"] = job
+
+    assert rw.cancel_docgen("d1") is True
+    assert job._cancelled is True
+    assert killed == [proc]
+    # idempotent / unknown ids are no-ops
+    assert rw.cancel_docgen("nope") is False
+    job.status = "done"
+    assert rw.cancel_docgen("d1") is False
+
+
 def test_docgen_progress_strips_rich_and_takes_last_informative_line(tmp_path):
     log = tmp_path / "d.log"
     log.write_text(

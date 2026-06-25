@@ -2035,7 +2035,17 @@ function openDocgenModal() {
         try {
           const { owner, repo, number } = prKey();
           const { job_id } = await api("POST", "/repowise/docs/generate", { owner, repo, number, model });
+          // While running, the close button cancels the job (kills the process)
+          // rather than orphaning it; restore it after.
+          const prevLabel = cancel.textContent;
+          cancel.textContent = "Cancel generation";
+          const onCancel = async () => {
+            try { await api("POST", `/repowise/docs/generate/${job_id}/cancel`); } catch { /* best-effort */ }
+          };
+          cancel.addEventListener("click", onCancel);
           await pollDocgen(job_id, status);
+          cancel.removeEventListener("click", onCancel);
+          cancel.textContent = prevLabel;
           go.disabled = false; go.textContent = "Generate";
         } catch (e) {
           go.disabled = false; go.textContent = "Generate";
@@ -2067,6 +2077,10 @@ async function pollDocgen(jobId, status) {
       toast("Docs generated");
       const rw = rwState();
       if (rw) { rw.blast = null; renderRepowise(); }
+      return;
+    }
+    if (snap.status === "cancelled") {
+      status.textContent = "Generation cancelled (pages finished before cancel were kept).";
       return;
     }
     status.textContent = (snap.error || "generation failed") + (snap.log_tail ? `\n${snap.log_tail.slice(-300)}` : "");

@@ -547,3 +547,9 @@ def test_docs_generate_start_and_status(client, monkeypatch):
 
     monkeypatch.setattr(repowise, "get_docgen", lambda jid: None)
     assert client.get("/repowise/docs/generate/nope").status_code == 404
+
+
+def test_docs_generate_cancel_route(client, monkeypatch):
+    monkeypatch.setattr(repowise, "cancel_docgen", lambda jid: True)
+    resp = client.post("/repowise/docs/generate/docgen-1/cancel")
+    assert resp.status_code == 200 and resp.json()["ok"] is True

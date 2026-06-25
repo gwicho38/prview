@@ -695,11 +695,13 @@ class DocgenJob:
     repo: str
     model: str
     worktree: str
-    status: str = "running"  # running | done | error
+    status: str = "running"  # running | done | error | cancelled
     started_at: float = 0.0
     error: str | None = None
     log_tail: str | None = None
     logfile: str = ""
+    _proc: "subprocess.Popen | None" = field(default=None, repr=False)
+    _cancelled: bool = field(default=False, repr=False)
 
 
 _docgens: dict[str, DocgenJob] = {}
@@ -720,12 +722,20 @@ def _run_docgen(job: DocgenJob) -> None:
     env.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
     try:
         with open(job.logfile, "w") as fh:
-            result = subprocess.run(
+            # Popen (not run) + own session: the job is long-running and
+            # cancellable, so we hold the process handle and signal its whole
+            # group on cancel. Saved page-by-page, so a cancel keeps finished pages.
+            proc = subprocess.Popen(
                 ["repowise", "init", job.worktree, "--yes", "--force",
                  "--provider", "ollama", "--model", job.model, "--no-workspace"],
-                cwd=job.worktree, env=env, stdout=fh, stderr=subprocess.STDOUT, text=True,
+                cwd=job.worktree, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                text=True, start_new_session=True,
             )
-        if result.returncode == 0:
+        job._proc = proc
+        rc = proc.wait()
+        if job._cancelled:
+            job.status = "cancelled"
+        elif rc == 0:
             job.status = "done"
         else:
             job.status = "error"
@@ -738,6 +748,19 @@ def _run_docgen(job: DocgenJob) -> None:
         job.status = "error"
         job.error = str(exc)
         job.log_tail = _read_tail(job.logfile)
+
+
+def cancel_docgen(job_id: str) -> bool:
+    """Cancel a running docgen job, terminating its process group. Pages already
+    generated are kept (repowise saves each as it completes)."""
+    with _docgens_lock:
+        job = _docgens.get(job_id)
+    if job is None or job.status != "running":
+        return False
+    job._cancelled = True
+    if job._proc is not None:
+        _terminate_proc(job._proc)
+    return True
 
 
 def start_docgen(owner: str, repo: str, model: str | None = None) -> str:

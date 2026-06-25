@@ -407,6 +407,11 @@ def repowise_docs_generate_status(job_id: str) -> DocgenSnapshot:
     return DocgenSnapshot(**snap)
 
 
+@app.post("/repowise/docs/generate/{job_id}/cancel", response_model=OkResponse)
+def repowise_docs_generate_cancel(job_id: str) -> OkResponse:
+    return OkResponse(ok=repowise.cancel_docgen(job_id))
+
+
 # --- Static assets ------------------------------------------------------------
 
 _STATIC_DIR = Path(__file__).parent / "static"

@@ -197,6 +197,39 @@ def parse_diff(raw: str) -> list[FileDiff]:
     return files
 
 
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def added_line_numbers(diff_text: str) -> list[int]:
+    """New-side line numbers of the added (`+`) lines in a file's unified diff.
+
+    Walks each hunk from its `+start` header: context and added lines advance
+    the new-side counter, removed lines do not. Lets the whole-file view
+    highlight exactly the lines this diff added. Diff headers (`+++`) are skipped.
+    """
+    added: list[int] = []
+    new_no = 0
+    in_hunk = False
+    for line in diff_text.splitlines():
+        m = _HUNK_RE.match(line)
+        if m:
+            new_no = int(m.group(1))
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("+++"):
+            continue
+        if line.startswith("+"):
+            added.append(new_no)
+            new_no += 1
+        elif line.startswith("-"):
+            pass  # removed line — no new-side number
+        else:
+            new_no += 1  # context (or "\ No newline" markers, harmless)
+    return added
+
+
 # ---------------------------------------------------------------------------
 # Prompt builders (pure)
 # ---------------------------------------------------------------------------

@@ -356,6 +356,17 @@ a { color: var(--accent); }
 .fd-empty { color: var(--fg-muted); margin: auto; font-family: var(--mono); }
 .fd-header { display: flex; align-items: baseline; gap: 14px; font-family: var(--mono); }
 .fd-header .fd-name { font-size: 15px; font-weight: 600; }
+/* Diff / Full-file toggle in the file header. */
+.fd-view-seg { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; align-self: center; }
+.fd-view-btn { background: none; border: 0; color: var(--fg-muted); font-size: 12px; font-family: var(--mono); padding: 3px 10px; cursor: pointer; }
+.fd-view-btn:hover { color: var(--fg); }
+.fd-view-btn.is-active { background: var(--accent); color: #fff; }
+/* Whole-file view: line-numbered table, added lines highlighted. */
+.diff-region .fullfile { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; line-height: 1.6; }
+.diff-region .fullfile td.ff-num { width: 1%; text-align: right; padding: 0 12px 0 10px; color: var(--fg-dim); user-select: none; white-space: nowrap; border-right: 1px solid var(--border); }
+.diff-region .fullfile td.ff-code { padding: 0 12px; color: var(--fg); white-space: pre; tab-size: 4; }
+.diff-region .fullfile tr.ff-added td.ff-code { background: rgba(46, 160, 67, 0.13); }
+.diff-region .fullfile tr.ff-added td.ff-num { background: rgba(46, 160, 67, 0.13); color: var(--green); }
 
 /* A fixed-height row beneath the scrolling .fd-scroll region (not in the scroll
    flow), so it never overlaps the diff and the last diff line is always visible. */

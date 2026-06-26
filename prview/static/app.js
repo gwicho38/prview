@@ -268,6 +268,7 @@ function enterReview(data) {
   State.files = data.files;
   State.review = data.review || data.state; // server key is `state`
   State.detailCache = {};
+  State.fullCache = {};
   State.ai = {};
   State.rw = null;
   applyReviewToFiles();
@@ -606,7 +607,21 @@ function renderFileDetail() {
   const name = document.createElement("span"); name.className = "fd-name"; name.textContent = f.filename;
   const counts = document.createElement("span");
   counts.innerHTML = `<span class="ps-adds">+${f.additions}</span> <span class="ps-dels">−${f.deletions}</span>`;
-  header.append(name, counts);
+  // Diff vs whole-file view toggle (per-file, remembered on State.viewMode).
+  const viewSeg = document.createElement("span");
+  viewSeg.className = "fd-view-seg";
+  for (const [mode, label] of [["diff", "Diff"], ["full", "Full file"]]) {
+    const b = document.createElement("button");
+    b.className = "fd-view-btn" + ((State.viewMode || "diff") === mode ? " is-active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      if ((State.viewMode || "diff") === mode) return;
+      State.viewMode = mode;
+      renderFileDetail();
+    });
+    viewSeg.appendChild(b);
+  }
+  header.append(name, counts, viewSeg);
 
   const aiPanel = document.createElement("div");
   aiPanel.className = "ai-panel";
@@ -632,7 +647,8 @@ function renderFileDetail() {
   scroll.append(header, aiPanel, comments, diffRegion);
   el.append(scroll, actions);
 
-  loadDiff(f.filename, diffRegion);
+  if ((State.viewMode || "diff") === "full") loadFullFile(f.filename, diffRegion);
+  else loadDiff(f.filename, diffRegion);
   startSummary(f.filename, false); // auto-submit summary on select
 }
 
@@ -680,6 +696,55 @@ async function loadDiff(path, region) {
   }
   if (path !== currentFile().filename) return; // user navigated away mid-load
   renderDiff(detail, region);
+}
+
+// ---- whole-file view (file at PR head; this PR's added lines highlighted) ---
+async function loadFullFile(path, region) {
+  region.innerHTML = '<div class="diff-loading"><span class="spinner"></span> Loading file…</div>';
+  let full = State.fullCache && State.fullCache[path];
+  try {
+    if (!full) {
+      const { owner, repo, number } = prKey();
+      full = await api("GET", `/pr/${owner}/${repo}/${number}/file/full?path=${encodeURIComponent(path)}`);
+      (State.fullCache || (State.fullCache = {}))[path] = full;
+    }
+  } catch (e) {
+    region.innerHTML = "";
+    const err = document.createElement("div");
+    err.className = "diff-placeholder";
+    err.textContent = `Could not load file: ${e.message}` +
+      (e.hint ? ` — ${e.hint}` : "") + ". Switch back to Diff to review the changes.";
+    region.appendChild(err);
+    return;
+  }
+  if (path !== currentFile().filename) return;
+  renderFullFile(full, region);
+}
+
+// Render every line of the file with line numbers; highlight the lines this PR
+// added. Built via DOM/textContent only (file content is untrusted) → XSS-safe.
+function renderFullFile(full, region) {
+  region.innerHTML = "";
+  const added = new Set(full.added_lines || []);
+  const lines = String(full.content || "").split("\n");
+  // Drop a single trailing empty element from a final newline.
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const table = document.createElement("table");
+  table.className = "fullfile";
+  const tb = document.createElement("tbody");
+  lines.forEach((text, i) => {
+    const n = i + 1;
+    const tr = document.createElement("tr");
+    if (added.has(n)) tr.className = "ff-added";
+    const num = document.createElement("td");
+    num.className = "ff-num"; num.textContent = String(n);
+    const code = document.createElement("td");
+    code.className = "ff-code"; code.textContent = text;
+    tr.append(num, code);
+    tb.appendChild(tr);
+  });
+  table.appendChild(tb);
+  region.appendChild(table);
 }
 
 function renderDiff(detail, region) {

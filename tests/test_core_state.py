@@ -76,3 +76,27 @@ def test_cli_written_file_without_submitted_still_loads(tmp_path, monkeypatch):
     loaded = load_review_state("o", "r", 3)
     assert loaded["viewed"] == ["x.py"]
     assert loaded.get("submitted", False) is False
+
+
+def test_added_line_numbers_from_unified_diff():
+    from prview.core import added_line_numbers
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        " a\n"          # context  new 1
+        "+b\n"          # added    new 2
+        " c\n"          # context  new 3
+        "-old\n"        # removed  (no new)
+        "+new1\n"       # added    new 4
+        "@@ -20,2 +21,3 @@\n"
+        " ctx\n"        # context  new 21
+        "+tail\n"       # added    new 22
+    )
+    assert added_line_numbers(diff) == [2, 4, 22]
+
+
+def test_added_line_numbers_empty_for_no_additions():
+    from prview.core import added_line_numbers
+    diff = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,1 @@\n a\n-gone\n"
+    assert added_line_numbers(diff) == []

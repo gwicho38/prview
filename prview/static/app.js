@@ -26,6 +26,7 @@ const State = {
   detailCache: {},     // path -> FileDetail
   ai: {},              // path -> {mode, status, jobId, result, qa, timer, t0, prevMode}
   rw: null,            // repowise prepare state for the current PR (see Repowise)
+  standalone: false,   // true when viewing a local repo without a PR
 };
 
 function prKey() {
@@ -85,6 +86,7 @@ async function api(method, path, body, { retryOn409 = true } = {}) {
 }
 
 function refString() {
+  if (State.standalone) return State.pr.repo;
   const { owner, repo, number } = State.pr;
   return `${owner}/${repo}#${number}`;
 }
@@ -180,6 +182,22 @@ refInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitRef()
 refInput.addEventListener("input", () => setRefError(""));
 document.getElementById("brand").addEventListener("click", () => show("landing"));
 
+// ---- standalone: local repo path ------------------------------------------
+const pathInput = document.getElementById("path-input");
+const pathBtn = document.getElementById("load-path-btn");
+const pathError = document.getElementById("path-error");
+
+async function submitPath() {
+  const raw = pathInput.value.trim();
+  if (!raw) { pathError.textContent = "Enter a local repo path."; pathError.hidden = false; return; }
+  pathError.hidden = true;
+  pathBtn.disabled = true; pathBtn.textContent = "Analyzing…";
+  try { await enterStandalone(raw); }
+  finally { pathBtn.disabled = false; pathBtn.textContent = "Analyze repo"; }
+}
+pathBtn.addEventListener("click", submitPath);
+pathInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitPath(); });
+
 // ---- theme (light / dark) -------------------------------------------------
 // Dark is the default; the choice persists in localStorage. Applying a theme
 // only swaps the data-theme attribute — every component re-themes via CSS vars —
@@ -269,6 +287,7 @@ async function resumeReview(owner, repo, number) {
 // screen:review — load data into state, render regions, pick starting file.
 // ============================================================================
 function enterReview(data) {
+  State.standalone = false;
   State.pr = data.pr;
   State.files = data.files;
   State.review = data.review || data.state; // server key is `state`
@@ -363,12 +382,24 @@ function buildNavTabs() {
 function renderSummary() {
   if (!State.pr) return;
   const pr = State.pr;
-  const ci = ciGlyph(pr.ci_status);
-  const dec = decisionGlyph(pr.review_decision);
   const el = document.getElementById(
     activeScreen === "repowise" ? "pr-summary-repowise" : "pr-summary");
   if (!el) return;
   el.innerHTML = "";
+
+  if (State.standalone) {
+    const title = document.createElement("div");
+    title.className = "ps-title";
+    const refSpan = document.createElement("span");
+    refSpan.className = "ps-ref";
+    refSpan.textContent = refString();
+    title.append(refSpan, document.createTextNode("  ·  local repo"));
+    el.append(title);
+    return;
+  }
+
+  const ci = ciGlyph(pr.ci_status);
+  const dec = decisionGlyph(pr.review_decision);
 
   const drawerBtn = document.createElement("button");
   drawerBtn.className = "btn btn-ghost drawer-toggle";
@@ -1751,6 +1782,27 @@ async function rwStartFlow() {
   rwPrepare();
 }
 
+async function enterStandalone(path) {
+  const base = path.replace(/\/+$/, "").split("/").pop() || "repo";
+  State.pr = { owner: "local", repo: base, number: 0 };
+  State.standalone = true;
+  State.rw = null;                  // fresh rwState for this target
+  show("repowise");
+  const rw = rwState();
+  rw.phase = "preparing"; rw.snap = null; rw.t0 = Date.now(); rw.alive = true;
+  rwShowLoading("Preparing repowise analysis…");
+  try {
+    const { job_id } = await api("POST", "/repowise/prepare-standalone", { path },
+                                 { retryOn409: false });
+    rw.jobId = job_id;
+    pollPrepare(job_id);
+  } catch (e) {
+    rw.phase = "error";
+    rw.snap = { error: e.message, error_hint: e.hint || "", error_step: null, steps: [] };
+    renderRwError(rw);
+  }
+}
+
 async function rwPrepare() {
   const rw = rwState();
   rw.phase = "preparing";
@@ -1902,7 +1954,7 @@ async function rwCancel() {
   rw.alive = false;
   rw.phase = "idle";
   rw.jobId = null;
-  show("review");
+  show(State.standalone ? "landing" : "review");
   if (jobId) { try { await api("POST", `/repowise/prepare/${jobId}/cancel`); } catch { /* best-effort */ } }
 }
 

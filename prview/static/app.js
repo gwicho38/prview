@@ -1787,9 +1787,9 @@ async function enterStandalone(path) {
   State.pr = { owner: "local", repo: base, number: 0 };
   State.standalone = true;
   State.rw = null;                  // fresh rwState for this target
-  show("repowise");
   const rw = rwState();
   rw.phase = "preparing"; rw.snap = null; rw.t0 = Date.now(); rw.alive = true;
+  show("repowise");                 // renderRepowise now early-returns (preparing)
   rwShowLoading("Preparing repowise analysis…");
   try {
     const { job_id } = await api("POST", "/repowise/prepare-standalone", { path },

@@ -553,3 +553,22 @@ def test_docs_generate_cancel_route(client, monkeypatch):
     monkeypatch.setattr(repowise, "cancel_docgen", lambda jid: True)
     resp = client.post("/repowise/docs/generate/docgen-1/cancel")
     assert resp.status_code == 200 and resp.json()["ok"] is True
+
+
+# --- POST /repowise/prepare-standalone ----------------------------------------
+
+def test_prepare_standalone_returns_job_id(client, monkeypatch):
+    monkeypatch.setattr(repowise, "start_prepare_standalone", lambda path: "job-xyz")
+    res = client.post("/repowise/prepare-standalone", json={"path": "/code/hello"})
+    assert res.status_code == 200
+    assert res.json()["job_id"] == "job-xyz"
+
+
+def test_prepare_standalone_surfaces_repowise_error(client, monkeypatch):
+    def _boom(path):
+        raise repowise.RepowiseError("not a git repository: /x", hint="needs a git repo")
+    monkeypatch.setattr(repowise, "start_prepare_standalone", _boom)
+    res = client.post("/repowise/prepare-standalone", json={"path": "/x"})
+    assert res.status_code == 400
+    body = res.json()
+    assert "git repository" in body["error"]

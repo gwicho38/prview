@@ -1977,7 +1977,9 @@ function renderRwEmbed(rw) {
   mark.className = "rw-bar-mark"; mark.textContent = "◆";
   const ctxText = document.createElement("span");
   ctxText.className = "rw-bar-ctx";
-  ctxText.textContent = ` repowise · ${refString()} @ ${pr.head || "?"}`;
+  ctxText.textContent = State.standalone
+    ? ` repowise · ${refString()}`
+    : ` repowise · ${refString()} @ ${pr.head || "?"}`;
   const port = document.createElement("span");
   port.textContent = snap.serve_port ? `  ·  :${snap.serve_port}` : "";
   ctx.append(mark, ctxText, port);
@@ -1985,10 +1987,14 @@ function renderRwEmbed(rw) {
   const actions = document.createElement("span");
   actions.className = "rw-bar-actions";
   // Complete (embedded dashboard) vs Diff associations (prview-native blast radius).
-  if (!rw.mode) rw.mode = "complete";
+  // Diff mode requires a real PR diff — suppress it and force complete in standalone.
+  if (!rw.mode || (State.standalone && rw.mode === "diff")) rw.mode = "complete";
   const seg = document.createElement("span");
   seg.className = "rw-mode-seg";
-  for (const [mode, label] of [["complete", "Complete"], ["diff", "Diff associations"]]) {
+  const modes = State.standalone
+    ? [["complete", "Complete"]]
+    : [["complete", "Complete"], ["diff", "Diff associations"]];
+  for (const [mode, label] of modes) {
     const b = document.createElement("button");
     b.className = "rw-mode-btn" + (rw.mode === mode ? " is-active" : "");
     b.textContent = label;

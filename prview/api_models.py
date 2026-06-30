@@ -275,6 +275,17 @@ class PrepareRequest(PRTarget):
     pass
 
 
+class PrepareStandaloneRequest(BaseModel):
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def _v_path(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("path must not be empty")
+        return v
+
+
 class RepowiseStatusResponse(BaseModel):
     cli_present: bool
     cli_hint: str | None = None

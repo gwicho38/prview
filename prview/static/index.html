@@ -37,6 +37,19 @@
           </div>
           <div class="field-hint" id="pr-ref-hint">Accepts <code>owner/repo#123</code> or a full GitHub PR URL.</div>
           <div class="field-error" id="pr-ref-error" role="alert" hidden></div>
+
+          <div class="field" style="margin-top:1rem">
+            <input
+              class="text-input"
+              id="path-input"
+              type="text"
+              placeholder="/path/to/a/local/repo"
+              aria-label="Local repo path"
+            />
+            <button class="btn" id="load-path-btn">Analyze repo</button>
+          </div>
+          <div class="field-hint" id="path-hint">Run repowise against a local git repo — no PR needed.</div>
+          <div class="field-error" id="path-error" role="alert" hidden></div>
         </div>
 
         <div class="section-title">Resume in-progress reviews</div>

@@ -44,6 +44,7 @@ from prview.api_models import (
     JobStatusResponse,
     OkResponse,
     PrepareRequest,
+    PrepareStandaloneRequest,
     BlastRadiusModel,
     BlastRadiusRequest,
     CoverageIngestModel,
@@ -365,6 +366,11 @@ async def repowise_prepare(req: PrepareRequest) -> JobIdResponse:
     if repowise.resolve_repo_path(req.owner, req.repo) is None:
         raise _err(409, "repo path not set", "POST /repowise/repo-path first")
     return JobIdResponse(job_id=repowise.start_prepare(req.owner, req.repo, req.number))
+
+
+@app.post("/repowise/prepare-standalone", response_model=JobIdResponse)
+def repowise_prepare_standalone(req: PrepareStandaloneRequest) -> JobIdResponse:
+    return JobIdResponse(job_id=repowise.start_prepare_standalone(req.path))
 
 
 @app.get("/repowise/prepare/{job_id}", response_model=PrepareSnapshot)

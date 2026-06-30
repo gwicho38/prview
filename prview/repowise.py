@@ -863,8 +863,9 @@ class PrepareJob:
     id: str
     owner: str
     repo: str
-    number: int
-    steps: PrepareSteps
+    number: int | None = None
+    path: str | None = None          # standalone: index this path, skip checkout
+    steps: PrepareSteps = field(default_factory=PrepareSteps)
     status: str = "running"  # running | done | error | cancelled
     started_at: float = 0.0
     dashboard_url: str | None = None
@@ -904,7 +905,7 @@ def _run_prepare(job: PrepareJob):
     current = "resolve_path"  # the step in flight, for exception attribution
     try:
         steps.start(current)
-        repo_path = resolve_repo_path(job.owner, job.repo)
+        repo_path = job.path or resolve_repo_path(job.owner, job.repo)
         if not repo_path:
             steps.fail(current, error="repo path not set",
                        hint="POST /repowise/repo-path first")
@@ -915,17 +916,21 @@ def _run_prepare(job: PrepareJob):
             job.status = "cancelled"
             return
 
-        current = "checkout"  # isolated worktree — never touches the dirty tree
-        steps.start(current)
-        worktree_path, head = prepare_pr_worktree(repo_path, job.number)
-        steps.done(current, detail=f"@ {head}" if head else "")
+        current = "checkout"  # PR-only: standalone indexes the path in place
+        if job.path:
+            steps.skip(current, detail="no PR — local path")
+            target_path = repo_path
+        else:
+            steps.start(current)
+            target_path, head = prepare_pr_worktree(repo_path, job.number)
+            steps.done(current, detail=f"@ {head}" if head else "")
         if _cancelled(job):
             job.status = "cancelled"
             return
 
-        current = "index"  # skip when wiki.db present (index the worktree)
+        current = "index"  # skip when wiki.db present (index the target path)
         steps.start(current)
-        skipped = ensure_indexed(worktree_path)
+        skipped = ensure_indexed(target_path)
         if skipped:
             steps.skip(current, detail="already indexed")
         else:
@@ -934,9 +939,9 @@ def _run_prepare(job: PrepareJob):
             job.status = "cancelled"
             return
 
-        current = "serve"  # lazy, reused; long-lived child (serves the worktree)
+        current = "serve"  # lazy, reused; long-lived child (serves the target path)
         steps.start(current, detail="allocating port…")
-        entry = ensure_serve(job.owner, job.repo, worktree_path)
+        entry = ensure_serve(job.owner, job.repo, target_path)
         job.serve_port = entry.ui_port
         job.dashboard_url = entry.url
         steps.done(current, detail=f":{entry.ui_port}")
@@ -977,6 +982,28 @@ def start_prepare(owner: str, repo: str, number: int) -> str:
         owner=owner, repo=repo, number=number,
         steps=PrepareSteps(),
         started_at=time.time(),
+    )
+    _prepares[job.id] = job
+    threading.Thread(target=_run_prepare, args=(job,), daemon=True).start()
+    return job.id
+
+
+def start_prepare_standalone(path: str) -> str:
+    """Mint a standalone prepare job for a local repo path (no PR)."""
+    expanded = Path(path).expanduser()
+    if not expanded.is_dir():
+        raise RepowiseError(f"not a directory: {path}",
+                            hint="enter a path to a local git repo")
+    chk = _run(["git", "-C", str(expanded), "rev-parse", "--is-inside-work-tree"])
+    if chk.returncode != 0 or chk.stdout.strip() != "true":
+        raise RepowiseError(f"not a git repository: {path}",
+                            hint="repowise needs a git repo to index")
+    resolved = str(expanded.resolve())
+    job = PrepareJob(
+        id=str(uuid.uuid4()),
+        owner="local", repo=Path(resolved).name or "repo",
+        number=None, path=resolved,
+        steps=PrepareSteps(), started_at=time.time(),
     )
     _prepares[job.id] = job
     threading.Thread(target=_run_prepare, args=(job,), daemon=True).start()

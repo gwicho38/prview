@@ -8,6 +8,8 @@ so these must pass without it.
 """
 from pathlib import Path
 
+import pytest
+
 import prview.core as core
 import prview.repowise as rw
 from prview.core import (
@@ -635,3 +637,45 @@ def test_ensure_indexed_skips_when_wiki_db_present(tmp_path, monkeypatch):
 
     monkeypatch.setattr(rw, "_run", boom)
     assert rw.ensure_indexed(str(repo)) is True
+
+
+# ---------------------------------------------------------------------------
+# Standalone prepare job (no PR, index a local path directly)
+# ---------------------------------------------------------------------------
+
+def test_run_prepare_standalone_skips_checkout(monkeypatch):
+    rw._prepares.clear()
+    calls = []
+    monkeypatch.setattr(rw, "prepare_pr_worktree",
+                        lambda *a, **k: calls.append("checkout") or ("/wt", "abc"))
+    monkeypatch.setattr(rw, "ensure_indexed", lambda p: calls.append(("index", p)) or True)
+
+    class _Entry:
+        ui_port = 7001
+        url = "http://127.0.0.1:7001/"
+        _proc = None
+    monkeypatch.setattr(rw, "ensure_serve",
+                        lambda o, r, p: calls.append(("serve", o, r, p)) or _Entry())
+    monkeypatch.setattr(rw, "probe_frameability", lambda e: True)
+
+    job = rw.PrepareJob(id="j1", owner="local", repo="hello", number=None,
+                        path="/code/hello", steps=rw.PrepareSteps(), started_at=0.0)
+    rw._run_prepare(job)
+
+    assert "checkout" not in calls                      # PR-only step skipped
+    assert ("index", "/code/hello") in calls            # indexed the path, not a worktree
+    assert job.status == "done"
+    assert job.steps.status_of("checkout") == "skipped"
+    assert job.steps.status_of("resolve_path") == "done"
+
+
+def test_start_prepare_standalone_rejects_non_git(tmp_path):
+    rw._prepares.clear()
+    with pytest.raises(rw.RepowiseError) as exc:
+        rw.start_prepare_standalone(str(tmp_path))      # a dir, but no git
+    assert "git" in exc.value.message.lower()
+
+
+def test_start_prepare_standalone_rejects_missing_dir():
+    with pytest.raises(rw.RepowiseError):
+        rw.start_prepare_standalone("/no/such/path/here")

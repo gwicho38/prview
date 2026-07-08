@@ -258,6 +258,7 @@ a { color: var(--accent); }
 .pr-summary .ps-title a.ps-ref-link::after { content: " \2197"; font-size: 0.85em; opacity: 0.7; }
 .pr-summary .ps-meta { color: var(--fg-muted); font-family: var(--mono); font-size: 13px; }
 .pr-summary .ps-meta .ps-branch { color: var(--fg); }
+.pr-summary .ps-meta .ps-excl-tests { opacity: 0.7; }
 .pr-summary .ps-status-row { display: flex; align-items: center; gap: 22px; margin-top: 4px; font-family: var(--mono); font-size: 13px; }
 .pr-summary .ps-status-row .submit-entry { margin-left: auto; }
 .ps-adds { color: var(--green); }

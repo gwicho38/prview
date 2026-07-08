@@ -27,6 +27,7 @@ const State = {
   ai: {},              // path -> {mode, status, jobId, result, qa, timer, t0, prevMode}
   rw: null,            // repowise prepare state for the current PR (see Repowise)
   standalone: false,   // true when viewing a local repo without a PR
+  hideTests: false,    // UI-only: drop test files from the file list + n/p nav
 };
 
 function prKey() {
@@ -389,6 +390,9 @@ function isTestFile(filename) {
   return _TEST_NAME_RE.test(filename);
 }
 
+// A file is hidden when the show/hide-tests toggle is off and it's a test file.
+function isHidden(f) { return State.hideTests && isTestFile(f.filename); }
+
 function renderSummary() {
   if (!State.pr) return;
   const pr = State.pr;
@@ -479,15 +483,30 @@ function renderFileList() {
   const el = document.getElementById("file-list");
   el.innerHTML = "";
 
-  const total = State.files.length;
-  const done = viewedCount();
+  // Progress reflects only visible files, so hiding tests doesn't strand the bar below 100%.
+  const visible = State.files.filter((f) => !isHidden(f));
+  const total = visible.length;
+  const done = visible.filter((f) => f.viewed).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
 
   const prog = document.createElement("div");
   prog.className = "fl-progress";
+  const head = document.createElement("div");
+  head.className = "fl-progress-head";
   const count = document.createElement("div");
   count.className = "fl-count";
   count.textContent = `${done}/${total} viewed`;
+  head.appendChild(count);
+
+  if (State.files.some((f) => isTestFile(f.filename))) {
+    const toggle = document.createElement("button");
+    toggle.className = "btn btn-ghost fl-tests-toggle";
+    toggle.textContent = State.hideTests ? "Tests: hidden" : "Tests: shown";
+    toggle.title = "Show/hide test files (t)";
+    toggle.setAttribute("aria-pressed", String(State.hideTests));
+    toggle.addEventListener("click", toggleHideTests);
+    head.appendChild(toggle);
+  }
   const track = document.createElement("div");
   track.className = "progress-track";
   track.setAttribute("role", "progressbar");
@@ -498,11 +517,12 @@ function renderFileList() {
   fill.className = "progress-fill";
   fill.style.width = pct + "%";
   track.appendChild(fill);
-  prog.append(count, track);
+  prog.append(head, track);
 
   const rows = document.createElement("div");
   rows.className = "fl-rows";
   State.files.forEach((f, i) => {
+    if (isHidden(f)) return;
     const row = document.createElement("button");
     row.className = "fl-row" + (i === State.idx ? " current" : "");
     row.dataset.idx = i;
@@ -543,6 +563,13 @@ function renderFileList() {
     rows.appendChild(row);
   });
 
+  if (!rows.childElementCount) {
+    const note = document.createElement("div");
+    note.className = "fl-empty";
+    note.textContent = "All files are test files — hidden.";
+    rows.appendChild(note);
+  }
+
   const legend = document.createElement("div");
   legend.className = "fl-legend";
   legend.innerHTML =
@@ -557,9 +584,30 @@ function currentFile() { return State.files[State.idx]; }
 
 function navTo(delta) {
   if (!State.files.length) return;
-  let i = State.idx + delta;
-  i = Math.max(0, Math.min(State.files.length - 1, i));
-  selectFile(i);
+  const step = delta < 0 ? -1 : 1;
+  for (let i = State.idx + step; i >= 0 && i < State.files.length; i += step) {
+    if (!isHidden(State.files[i])) { selectFile(i); return; }
+  }
+}
+
+// Index of the visible file closest to `from`, searching outward; -1 if none.
+function nearestVisible(from) {
+  for (let d = 0; d < State.files.length; d++) {
+    if (from + d < State.files.length && !isHidden(State.files[from + d])) return from + d;
+    if (from - d >= 0 && !isHidden(State.files[from - d])) return from - d;
+  }
+  return -1;
+}
+
+function toggleHideTests() {
+  State.hideTests = !State.hideTests;
+  // Keep the detail pane off a file that just got hidden.
+  if (isHidden(currentFile())) {
+    const i = nearestVisible(State.idx);
+    if (i >= 0) State.idx = i;
+  }
+  renderFileList();
+  renderFileDetail();
 }
 
 function selectFile(i) {
@@ -2571,6 +2619,7 @@ document.addEventListener("keydown", (e) => {
     case "a": e.preventDefault(); focusAsk(); break;
     case "c": e.preventDefault(); openCommentModal(); break;
     case "f": e.preventDefault(); openFlagModal(); break;
+    case "t": e.preventDefault(); toggleHideTests(); break;
     case "s": e.preventDefault(); show("submit"); break;
     case "q": case "Escape": e.preventDefault(); show("landing"); break;
   }

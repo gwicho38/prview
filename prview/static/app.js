@@ -379,6 +379,16 @@ function buildNavTabs() {
   return wrap;
 }
 
+// Heuristic test-file match (path segment or filename convention), used to
+// break out a non-test line-change count in the PR summary.
+const _TEST_NAME_RE = /(^|\/)(test_.+\.py|.+_test\.(py|go)|.+\.(test|spec)\.(jsx?|tsx?)|.+Test\.java|.+Tests\.cs|.+_spec\.rb)$/i;
+function isTestFile(filename) {
+  const segs = filename.toLowerCase().split("/");
+  if (segs.slice(0, -1).some((s) => s === "test" || s === "tests" || s === "__tests__" || s === "spec"))
+    return true;
+  return _TEST_NAME_RE.test(filename);
+}
+
 function renderSummary() {
   if (!State.pr) return;
   const pr = State.pr;
@@ -429,6 +439,23 @@ function renderSummary() {
   const adds = document.createElement("span"); adds.className = "ps-adds"; adds.textContent = `+${pr.additions}`;
   const dels = document.createElement("span"); dels.className = "ps-dels"; dels.textContent = `−${pr.deletions}`;
   meta.append(adds, " / ", dels);
+
+  const nonTest = State.files.filter((f) => !isTestFile(f.filename));
+  if (nonTest.length !== State.files.length) {
+    const a = nonTest.reduce((s, f) => s + f.additions, 0);
+    const d = nonTest.reduce((s, f) => s + f.deletions, 0);
+    const ex = document.createElement("span");
+    ex.className = "ps-excl-tests";
+    ex.title = "line changes excluding test files";
+    ex.append(
+      document.createTextNode("  (excl. tests "),
+      Object.assign(document.createElement("span"), { className: "ps-adds", textContent: `+${a}` }),
+      document.createTextNode(" / "),
+      Object.assign(document.createElement("span"), { className: "ps-dels", textContent: `−${d}` }),
+      document.createTextNode(")"),
+    );
+    meta.append(ex);
+  }
 
   const statusRow = document.createElement("div");
   statusRow.className = "ps-status-row";

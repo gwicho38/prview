@@ -148,13 +148,23 @@ window.addEventListener("hashchange", () => {
 // ----------------------------------------------------------------------------
 // Toast + ARIA live announcements.
 // ----------------------------------------------------------------------------
-function toast(message, kind = "success") {
+function toast(message, kind = "success", opts = {}) {
   const stack = document.getElementById("toast-stack");
   const el = document.createElement("div");
   el.className = "toast" + (kind === "error" ? " toast-error" : "");
   el.textContent = message;
+  if (opts.href) {
+    const a = document.createElement("a");
+    a.className = "toast-link";
+    a.href = opts.href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = "View on GitHub →";
+    el.appendChild(a);
+  }
   stack.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
+  // A linked toast lives longer so it is actually clickable.
+  setTimeout(() => el.remove(), opts.href ? 8000 : 3200);
   announce(message);
 }
 function announce(message) {
@@ -1814,7 +1824,7 @@ async function doSubmit(submit, cancel, dec, bodyTa) {
     const res = await api("POST", "/review/submit", payload);
     if (res && res.ok) {
       State.review.submitted = true;
-      toast("Review submitted");
+      toast("Review submitted", "success", { href: res.url || prUrl() });
       show("landing");
     } else {
       throw new Error((res && res.error) || "review submission failed");

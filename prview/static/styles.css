@@ -771,6 +771,7 @@ a { color: var(--accent); }
   animation: toast-in 0.18s ease-out;
 }
 .toast.toast-error { border-left-color: var(--red); }
+.toast-link { color: inherit; text-decoration: underline; margin-left: 8px; white-space: nowrap; }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---- Narrow-screen fallback (drawer + unified diff) -------------------- */

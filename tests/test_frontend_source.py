@@ -23,3 +23,9 @@ def test_nav_tabs_order_overview_first():
 
 def test_fenced_blocks_render_preformatted():
     assert "ai-md-pre" in APP_JS
+
+
+def test_submit_toast_links_to_review():
+    assert 'toast("Review submitted", "success", { href: res.url || prUrl() })' in APP_JS
+    assert "opts.href" in APP_JS
+    assert '"toast-link"' in APP_JS

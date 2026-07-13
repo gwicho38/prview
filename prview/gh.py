@@ -117,6 +117,27 @@ def submit_review(owner: str, repo: str, number: int, event: str, body: str):
     return result.returncode == 0, result.stderr.strip()
 
 
+def latest_review_url(owner: str, repo: str, number: int) -> str | None:
+    """URL of the most recently submitted review on a PR, or None.
+
+    `gh pr review` prints nothing usable on success, so the just-submitted
+    review's html_url is resolved from the reviews list (last entry). Never
+    raises — a missing URL only downgrades the client's toast link.
+    """
+    try:
+        result = _run(
+            ["gh", "api", "-X", "GET", f"repos/{owner}/{repo}/pulls/{number}/reviews"],
+        )
+        if result.returncode != 0:
+            return None
+        reviews = json.loads(result.stdout)
+        if isinstance(reviews, list) and reviews:
+            return reviews[-1].get("html_url")
+    except (GhError, json.JSONDecodeError):
+        pass
+    return None
+
+
 def mark_file_viewed(owner: str, repo: str, number: int, path: str) -> bool:
     """Mark a file as viewed via GitHub GraphQL (src 226-250).
 

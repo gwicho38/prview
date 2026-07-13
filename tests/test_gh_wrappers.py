@@ -212,3 +212,37 @@ def test_post_pr_comment_file_uses_body_file(monkeypatch):
     assert captured["cmd"][:4] == ["gh", "pr", "comment", "9"]
     assert "--repo" in captured["cmd"] and "o/r" in captured["cmd"]
     assert captured["content"] == body
+
+
+def test_latest_review_url_returns_last_html_url(monkeypatch):
+    import json as _json
+    import subprocess as _sp
+
+    captured = {}
+
+    def fake_run(cmd):
+        captured["cmd"] = cmd
+        reviews = [
+            {"id": 1, "html_url": "https://github.com/o/r/pull/9#pullrequestreview-1"},
+            {"id": 2, "html_url": "https://github.com/o/r/pull/9#pullrequestreview-2"},
+        ]
+        return _sp.CompletedProcess(cmd, 0, stdout=_json.dumps(reviews), stderr="")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    url = gh.latest_review_url("o", "r", 9)
+    assert url == "https://github.com/o/r/pull/9#pullrequestreview-2"
+    assert captured["cmd"][:2] == ["gh", "api"]
+    assert "repos/o/r/pulls/9/reviews" in captured["cmd"]
+
+
+def test_latest_review_url_none_on_failure_or_empty(monkeypatch):
+    import subprocess as _sp
+
+    monkeypatch.setattr(gh, "_run", lambda cmd: _sp.CompletedProcess(cmd, 1, stdout="", stderr="boom"))
+    assert gh.latest_review_url("o", "r", 9) is None
+
+    monkeypatch.setattr(gh, "_run", lambda cmd: _sp.CompletedProcess(cmd, 0, stdout="[]", stderr=""))
+    assert gh.latest_review_url("o", "r", 9) is None
+
+    monkeypatch.setattr(gh, "_run", lambda cmd: _sp.CompletedProcess(cmd, 0, stdout="{not json", stderr=""))
+    assert gh.latest_review_url("o", "r", 9) is None

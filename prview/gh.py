@@ -44,7 +44,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 def fetch_pr_info(owner: str, repo: str, number: int) -> PRInfo:
     """Fetch PR metadata via gh CLI (src 156-201)."""
     fields = (
-        "title,author,body,baseRefName,headRefName,state,"
+        "title,author,body,baseRefName,headRefName,headRefOid,state,"
         "reviewDecision,statusCheckRollup,additions,deletions,changedFiles"
     )
     result = _run(
@@ -81,6 +81,7 @@ def fetch_pr_info(owner: str, repo: str, number: int) -> PRInfo:
         body=data.get("body", "") or "",
         base=data.get("baseRefName", ""),
         head=data.get("headRefName", ""),
+        head_sha=data.get("headRefOid", ""),
         state=data.get("state", ""),
         review_decision=data.get("reviewDecision", "") or "",
         ci_status=ci,

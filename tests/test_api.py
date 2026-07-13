@@ -25,12 +25,13 @@ def client(tmp_path, monkeypatch):
     return c
 
 
-def _fake_pr():
+def _fake_pr(head_sha="sha-a"):
     return core.PRInfo(
         owner="octo", repo="hello", number=7,
         title="Add feature", author="alice", body="desc",
         base="main", head="feat", state="OPEN",
         additions=10, deletions=2, changed_files=2,
+        head_sha=head_sha,
     )
 
 
@@ -63,6 +64,12 @@ def test_post_pr_happy_path(client, monkeypatch):
     # NO diff_text in the list response
     assert all("diff_text" not in f for f in data["files"])
     assert data["state"]["comments"] == 0
+
+
+def test_pr_response_carries_head_sha(client, monkeypatch):
+    resp = _load_pr(client, monkeypatch)
+    assert resp.status_code == 200
+    assert resp.json()["pr"]["head_sha"] == "sha-a"
 
 
 def test_post_pr_gh_unauth_returns_structured_4xx(client, monkeypatch):

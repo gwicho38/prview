@@ -130,6 +130,7 @@ class PRInfoModel(BaseModel):
     body: str = ""
     base: str = ""
     head: str = ""
+    head_sha: str = ""
     state: str = ""
     review_decision: str = ""
     ci_status: str = ""

@@ -139,8 +139,6 @@ function initialTab() {
   return State.standalone ? "review" : "overview";
 }
 
-function renderOverview() {}
-
 window.addEventListener("hashchange", () => {
   const h = location.hash.replace(/^#/, "");
   if (State.pr && tabOrder().includes(h) && h !== activeScreen) show(h);
@@ -1348,6 +1346,18 @@ function renderMarkdown(el, text) {
   while (i < lines.length) {
     const t = lines[i].trim();
     if (t === "") { flush(); i++; continue; }
+    if (t.startsWith("```")) {
+      flush();
+      const buf = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) { buf.push(lines[i]); i++; }
+      i++; // consume closing fence (or run off EOF — same result)
+      const pre = document.createElement("pre");
+      pre.className = "ai-md-pre";
+      pre.textContent = buf.join("\n");
+      el.appendChild(pre);
+      continue;
+    }
     if (isSeparatorLine(lines[i])) { flush(); el.appendChild(document.createElement("hr")); i++; continue; }
     if (/^#{1,6}\s+/.test(t)) {
       flush();
@@ -2525,6 +2535,154 @@ function openRepoPathModal() {
       modal.appendChild(foot);
     },
   });
+}
+
+// ============================================================================
+// component:overview-panel — whole-PR AI orientation, cached per head SHA
+// ============================================================================
+function ovState() {
+  if (!State.ov) {
+    State.ov = { status: "idle", jobId: null, markdown: "", sha: null, error: "", elapsed: 0 };
+  }
+  return State.ov;
+}
+
+async function renderOverview() {
+  if (!State.pr || State.standalone) return;
+  const ov = ovState();
+  if (ov.status === "idle" && !ov.markdown) {
+    let data = null;
+    try {
+      data = await api("GET", `/overview/${State.pr.owner}/${State.pr.repo}/${State.pr.number}`);
+    } catch (e) {
+      ov.status = "error";
+      ov.error = e.message + (e.hint ? ` — ${e.hint}` : "");
+      paintOverview();
+      return;
+    }
+    if (data.markdown) {
+      ov.markdown = data.markdown; ov.sha = data.sha; ov.status = "done";
+    } else {
+      startOverviewJob();          // no cache, or stale SHA → regenerate
+      return;
+    }
+  }
+  paintOverview();
+}
+
+async function startOverviewJob() {
+  const ov = ovState();
+  ov.status = "running"; ov.error = ""; ov.elapsed = 0; ov.jobId = null;
+  paintOverview();
+  try {
+    const { job_id } = await api("POST", "/ai/overview", prKey());
+    ov.jobId = job_id;
+    pollJobId(job_id, {
+      alive: () => ov.status === "running" && ov.jobId === job_id,
+      onTick: (snap) => { ov.elapsed = snap.elapsed; if (activeScreen === "overview") paintOverview(); },
+      onDone: async () => {
+        // Server persisted the result in the job's on_done hook; re-fetch the
+        // canonical copy rather than trusting the raw job result.
+        try {
+          const data = await api("GET", `/overview/${State.pr.owner}/${State.pr.repo}/${State.pr.number}`);
+          ov.markdown = data.markdown || ""; ov.sha = data.sha;
+        } catch { ov.markdown = ""; }
+        ov.status = ov.markdown ? "done" : "error";
+        if (!ov.markdown) ov.error = "overview generation returned nothing";
+        if (activeScreen === "overview") paintOverview();
+        announce("Overview ready");
+      },
+      onError: (snap) => {
+        ov.status = "error"; ov.error = snap.error || "claude call failed";
+        if (activeScreen === "overview") paintOverview();
+        announce("Overview generation failed");
+      },
+    });
+  } catch (e) {
+    ov.status = "error";
+    ov.error = e.message + (e.hint ? ` — ${e.hint}` : "");
+    paintOverview();
+  }
+}
+
+async function cancelOverviewJob() {
+  const ov = ovState();
+  const jobId = ov.jobId;
+  ov.status = ov.markdown ? "done" : "cancelled";
+  ov.jobId = null;
+  paintOverview();
+  if (jobId) { try { await api("POST", `/job/${jobId}/cancel`); } catch { /* best-effort */ } }
+}
+
+async function postOverviewComment(btn) {
+  btn.disabled = true; btn.textContent = "Posting…";
+  try {
+    const res = await api("POST", "/overview/comment", prKey());
+    if (res.ok) toast("Overview posted to PR");
+    else toast(res.error || "comment failed", "error");
+  } catch (e) {
+    toast(e.message + (e.hint ? ` — ${e.hint}` : ""), "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "Post as comment";
+  }
+}
+
+function paintOverview() {
+  const region = document.getElementById("overview-region");
+  if (!region) return;
+  region.innerHTML = "";
+  const ov = ovState();
+
+  if (ov.status === "running") {
+    const box = document.createElement("div");
+    box.className = "ov-loading";
+    const load = document.createElement("div");
+    load.className = "ai-loading";
+    load.innerHTML = `<span class="spinner"></span> Generating overview… ${Math.floor(ov.elapsed || 0)}s (${MAX_NOTE})`;
+    const cancel = document.createElement("button");
+    cancel.className = "btn btn-ghost";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", cancelOverviewJob);
+    box.append(load, cancel);
+    region.appendChild(box);
+    return;
+  }
+
+  if (ov.status === "error" || ov.status === "cancelled") {
+    const box = document.createElement("div");
+    box.className = "ov-loading";
+    const msg = document.createElement("div");
+    msg.className = "ai-error";
+    msg.textContent = ov.status === "cancelled" ? "Generation cancelled." : `⚠ ${ov.error}`;
+    const retry = document.createElement("button");
+    retry.className = "btn";
+    retry.textContent = ov.status === "cancelled" ? "Generate" : "Retry";
+    retry.addEventListener("click", startOverviewJob);
+    box.append(msg, retry);
+    region.appendChild(box);
+    return;
+  }
+
+  // done — toolbar + rendered markdown
+  const bar = document.createElement("div");
+  bar.className = "ov-toolbar";
+  const regen = document.createElement("button");
+  regen.className = "btn btn-ghost";
+  regen.textContent = "↻ Regenerate";
+  regen.title = "Re-run the overview job (ignores the cached result)";
+  regen.addEventListener("click", startOverviewJob);
+  const post = document.createElement("button");
+  post.className = "btn";
+  post.textContent = "Post as comment";
+  post.title = "Post this overview to the PR via gh";
+  post.addEventListener("click", () => postOverviewComment(post));
+  bar.append(regen, post);
+
+  const body = document.createElement("div");
+  body.className = "ov-body ai-body";
+  renderMarkdown(body, ov.markdown);
+
+  region.append(bar, body);
 }
 
 // ============================================================================

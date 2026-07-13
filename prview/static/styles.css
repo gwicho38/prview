@@ -736,6 +736,21 @@ a { color: var(--accent); }
   min-height: 0;
   padding: 24px 28px;
 }
+.ov-toolbar { display: flex; gap: 10px; justify-content: flex-end; margin-bottom: 14px; }
+.ov-loading { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 32px 0; }
+.ov-body { max-width: 980px; margin: 0 auto; max-height: none; overflow-y: visible; }
+.ai-md-pre {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.35;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+  white-space: pre;
+}
 
 /* ---- Toast ------------------------------------------------------------- */
 .toast-stack { position: fixed; bottom: 22px; right: 22px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }

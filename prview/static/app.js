@@ -2550,7 +2550,9 @@ function ovState() {
 async function renderOverview() {
   if (!State.pr || State.standalone) return;
   const ov = ovState();
-  if (ov.status === "idle" && !ov.markdown) {
+  if (ov.status === "idle") {
+    ov.status = "loading";
+    paintOverview();
     let data = null;
     try {
       data = await api("GET", `/overview/${State.pr.owner}/${State.pr.repo}/${State.pr.number}`);
@@ -2583,12 +2585,17 @@ async function startOverviewJob() {
       onDone: async () => {
         // Server persisted the result in the job's on_done hook; re-fetch the
         // canonical copy rather than trusting the raw job result.
+        let refetchFailed = false;
         try {
           const data = await api("GET", `/overview/${State.pr.owner}/${State.pr.repo}/${State.pr.number}`);
           ov.markdown = data.markdown || ""; ov.sha = data.sha;
-        } catch { ov.markdown = ""; }
+        } catch (e) {
+          ov.markdown = "";
+          refetchFailed = true;
+          ov.error = "generated, but failed to load the saved overview: " + (e.message || e);
+        }
         ov.status = ov.markdown ? "done" : "error";
-        if (!ov.markdown) ov.error = "overview generation returned nothing";
+        if (!ov.markdown && !refetchFailed) ov.error = "overview generation returned nothing";
         if (activeScreen === "overview") paintOverview();
         announce("Overview ready");
       },
@@ -2618,7 +2625,7 @@ async function postOverviewComment(btn) {
   btn.disabled = true; btn.textContent = "Posting…";
   try {
     const res = await api("POST", "/overview/comment", prKey());
-    if (res.ok) toast("Overview posted to PR");
+    if (res && res.ok) toast("Overview posted to PR");
     else toast(res.error || "comment failed", "error");
   } catch (e) {
     toast(e.message + (e.hint ? ` — ${e.hint}` : ""), "error");
@@ -2633,17 +2640,22 @@ function paintOverview() {
   region.innerHTML = "";
   const ov = ovState();
 
-  if (ov.status === "running") {
+  if (ov.status === "running" || ov.status === "loading") {
     const box = document.createElement("div");
     box.className = "ov-loading";
     const load = document.createElement("div");
     load.className = "ai-loading";
-    load.innerHTML = `<span class="spinner"></span> Generating overview… ${Math.floor(ov.elapsed || 0)}s (${MAX_NOTE})`;
-    const cancel = document.createElement("button");
-    cancel.className = "btn btn-ghost";
-    cancel.textContent = "Cancel";
-    cancel.addEventListener("click", cancelOverviewJob);
-    box.append(load, cancel);
+    load.innerHTML = ov.status === "running"
+      ? `<span class="spinner"></span> Generating overview… ${Math.floor(ov.elapsed || 0)}s (${MAX_NOTE})`
+      : `<span class="spinner"></span> Loading overview…`;
+    box.append(load);
+    if (ov.status === "running") {
+      const cancel = document.createElement("button");
+      cancel.className = "btn btn-ghost";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", cancelOverviewJob);
+      box.append(cancel);
+    }
     region.appendChild(box);
     return;
   }

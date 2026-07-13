@@ -227,7 +227,7 @@ async def cancel_job(job_id: str) -> OkResponse:
     return OkResponse(ok=jobs.cancel_job(job_id))
 
 
-# --- Overview (G?) — whole-PR AI orientation, cached per head SHA --------------
+# --- Overview — whole-PR AI orientation, cached per head SHA -------------------
 
 @app.get("/overview/{owner}/{repo}/{n}", response_model=OverviewModel)
 def get_overview(owner: str, repo: str, n: int) -> OverviewModel:

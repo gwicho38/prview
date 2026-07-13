@@ -65,6 +65,7 @@ from prview.api_models import (
     ResumableRow,
     ReviewStateModel,
     SubmitRequest,
+    SubmitResponse,
     ViewedResponse,
 )
 from prview.cache import CACHE_MISS, PRCache
@@ -329,8 +330,8 @@ def _flagged_body(state: dict) -> str:
     return body
 
 
-@app.post("/review/submit", response_model=OkResponse)
-def submit_review(req: SubmitRequest) -> OkResponse:
+@app.post("/review/submit", response_model=SubmitResponse)
+def submit_review(req: SubmitRequest) -> SubmitResponse:
     state = core.load_review_state(req.owner, req.repo, req.number)
     body = req.body if req.body is not None else _flagged_body(state)
     ok, err = gh.submit_review(req.owner, req.repo, req.number, req.event, body)
@@ -340,8 +341,8 @@ def submit_review(req: SubmitRequest) -> OkResponse:
             return s
 
         state_store.mutate_state(req.owner, req.repo, req.number, mutate)
-        return OkResponse(ok=True)
-    return OkResponse(ok=False, error=err or "review submission failed")
+        return SubmitResponse(ok=True, url=gh.latest_review_url(req.owner, req.repo, req.number))
+    return SubmitResponse(ok=False, error=err or "review submission failed")
 
 
 # --- Read routes (sync: read state from disk) ---------------------------------

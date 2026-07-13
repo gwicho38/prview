@@ -217,6 +217,10 @@ class OkResponse(BaseModel):
     error: str | None = None
 
 
+class SubmitResponse(OkResponse):
+    url: str | None = None
+
+
 class ViewedResponse(BaseModel):
     viewed: bool
     remote_ok: bool

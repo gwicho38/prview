@@ -252,6 +252,7 @@ def test_review_submit_maps_event_and_marks_submitted(client, monkeypatch):
         return True, ""
 
     monkeypatch.setattr(gh, "submit_review", fake_submit)
+    monkeypatch.setattr(gh, "latest_review_url", lambda o, r, n: None)
     resp = client.post("/review/submit", json={"owner": "octo", "repo": "hello", "number": 7, "event": "request_changes"})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -368,3 +369,24 @@ def test_post_overview_comment_posts_stored_markdown(client, monkeypatch):
     resp = client.post("/overview/comment", json={"owner": "octo", "repo": "hello", "number": 7})
     assert resp.status_code == 200 and resp.json()["ok"] is True
     assert posted["body"] == "## OV body"
+
+
+def test_review_submit_carries_review_url(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "submit_review", lambda o, r, n, e, b: (True, ""))
+    monkeypatch.setattr(gh, "latest_review_url",
+                        lambda o, r, n: "https://github.com/octo/hello/pull/7#pullrequestreview-5")
+    resp = client.post("/review/submit", json={"owner": "octo", "repo": "hello", "number": 7, "event": "comment"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["url"] == "https://github.com/octo/hello/pull/7#pullrequestreview-5"
+
+
+def test_review_submit_url_null_when_lookup_fails(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "submit_review", lambda o, r, n, e, b: (True, ""))
+    monkeypatch.setattr(gh, "latest_review_url", lambda o, r, n: None)
+    resp = client.post("/review/submit", json={"owner": "octo", "repo": "hello", "number": 7, "event": "comment"})
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "error": None, "url": None}

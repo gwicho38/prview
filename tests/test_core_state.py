@@ -100,3 +100,24 @@ def test_added_line_numbers_empty_for_no_additions():
     from prview.core import added_line_numbers
     diff = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,1 @@\n a\n-gone\n"
     assert added_line_numbers(diff) == []
+
+
+def test_overview_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_CACHE_DIR", tmp_path)
+    core.save_overview("o", "r", 1, "sha-a", "# Overview\n```\nbox\n```")
+    data = core.load_overview("o", "r", 1)
+    assert data["sha"] == "sha-a"
+    assert data["markdown"].startswith("# Overview")
+    assert data["generated_at"] > 0
+
+
+def test_overview_missing_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_CACHE_DIR", tmp_path)
+    assert core.load_overview("o", "r", 1) == {}
+
+
+def test_overview_corrupt_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_CACHE_DIR", tmp_path)
+    tmp_path.mkdir(exist_ok=True)
+    (tmp_path / "o-r-1-overview.json").write_text("{not json")
+    assert core.load_overview("o", "r", 1) == {}

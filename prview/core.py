@@ -10,6 +10,7 @@ deviations:
 """
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -77,6 +78,35 @@ def set_repo_path(owner: str, repo: str, path: str):
     repo_map = load_repo_map()
     repo_map[f"{owner}/{repo}"] = path
     save_repo_map(repo_map)
+
+
+# ---------------------------------------------------------------------------
+# Overview cache — one AI-generated overview per PR, keyed by head SHA
+# ---------------------------------------------------------------------------
+
+def _overview_path(owner: str, repo: str, number: int) -> Path:
+    return _CACHE_DIR / f"{owner}-{repo}-{number}-overview.json"
+
+
+def load_overview(owner: str, repo: str, number: int) -> dict:
+    """Load the cached overview, tolerating missing/corrupt files."""
+    path = _overview_path(owner, repo, number)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            if isinstance(data, dict) and "sha" in data and "markdown" in data:
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_overview(owner: str, repo: str, number: int, sha: str, markdown: str):
+    """Persist the overview for the head SHA it was generated against."""
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _overview_path(owner, repo, number).write_text(json.dumps(
+        {"sha": sha, "markdown": markdown, "generated_at": time.time()},
+        indent=2) + "\n")
 
 
 def apply_saved_state(files: list, state: dict):

@@ -163,8 +163,13 @@ def test_start_overview_persists_cache_on_done(tmp_path, monkeypatch):
         job_id = jobs.start_overview(pr, files, "sha-xyz")
         snap = _wait_status(job_id, "done")
     assert snap["status"] == "done"
-    time.sleep(0.05)  # Allow callback to complete before checking cache
-    stored = core.load_overview("o", "r", 3)
+    deadline = time.time() + 2.0
+    stored = {}
+    while time.time() < deadline:
+        stored = core.load_overview("o", "r", 3)
+        if stored:
+            break
+        time.sleep(0.005)
     assert stored["sha"] == "sha-xyz"
     assert stored["markdown"] == "the answer"
 

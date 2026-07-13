@@ -192,3 +192,23 @@ def test_fetch_pr_info_parses_head_ref_oid(monkeypatch):
     pr = gh.fetch_pr_info("o", "r", 1)
     assert pr.head_sha == "abc123def456"
     assert "headRefOid" in captured["cmd"][captured["cmd"].index("--json") + 1]
+
+
+def test_post_pr_comment_file_uses_body_file(monkeypatch):
+    import subprocess as _sp
+    from pathlib import Path as _P
+
+    captured = {}
+
+    def fake_run(cmd):
+        captured["cmd"] = cmd
+        idx = cmd.index("--body-file")
+        captured["content"] = _P(cmd[idx + 1]).read_text()
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    body = "## Overview\n```\n┌box┐\n└───┘\n```"
+    assert gh.post_pr_comment_file("o", "r", 9, body) is True
+    assert captured["cmd"][:4] == ["gh", "pr", "comment", "9"]
+    assert "--repo" in captured["cmd"] and "o/r" in captured["cmd"]
+    assert captured["content"] == body

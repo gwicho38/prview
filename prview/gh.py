@@ -10,7 +10,9 @@ All argv is fixed; client-supplied strings (paths, comment bodies) are passed
 as discrete argv elements and are never shell-interpolated.
 """
 import json
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 
 from prview.core import PRInfo
@@ -160,6 +162,23 @@ def post_pr_comment(owner: str, repo: str, number: int, path: str, text: str) ->
          "--body", body],
     )
     return result.returncode == 0
+
+
+def post_pr_comment_file(owner: str, repo: str, number: int, body: str) -> bool:
+    """Post a PR comment from a temp file (`--body-file`) — avoids argv size
+    limits for large bodies (the overview ships whole ASCII diagrams). Body is
+    posted verbatim, no path prefix."""
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
+        tf.write(body)
+        tmp = tf.name
+    try:
+        result = _run(
+            ["gh", "pr", "comment", str(number), "--repo", f"{owner}/{repo}",
+             "--body-file", tmp],
+        )
+        return result.returncode == 0
+    finally:
+        os.unlink(tmp)
 
 
 def pr_head_sha(owner: str, repo: str, number: int) -> str:

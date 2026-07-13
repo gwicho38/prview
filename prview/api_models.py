@@ -385,3 +385,9 @@ class DocgenSnapshot(BaseModel):
     progress: str | None = None
     error: str | None = None
     log_tail: str | None = None
+
+
+class OverviewModel(BaseModel):
+    markdown: str | None = None
+    sha: str | None = None
+    stale: bool = False

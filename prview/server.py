@@ -52,6 +52,7 @@ from prview.api_models import (
     DocgenRequest,
     DocgenSnapshot,
     OllamaModelsModel,
+    OverviewModel,
     PrepareSnapshot,
     PRInfoModel,
     PRRefRequest,
@@ -224,6 +225,36 @@ async def get_job(job_id: str) -> JobStatusResponse:
 @app.post("/job/{job_id}/cancel", response_model=OkResponse)
 async def cancel_job(job_id: str) -> OkResponse:
     return OkResponse(ok=jobs.cancel_job(job_id))
+
+
+# --- Overview (G?) — whole-PR AI orientation, cached per head SHA --------------
+
+@app.get("/overview/{owner}/{repo}/{n}", response_model=OverviewModel)
+def get_overview(owner: str, repo: str, n: int) -> OverviewModel:
+    entry = _cached(owner, repo, n)
+    stored = core.load_overview(owner, repo, n)
+    if not stored:
+        return OverviewModel()
+    if stored.get("sha") != entry["pr"].head_sha:
+        return OverviewModel(sha=stored.get("sha"), stale=True)
+    return OverviewModel(markdown=stored.get("markdown"), sha=stored.get("sha"))
+
+
+@app.post("/ai/overview", response_model=JobIdResponse)
+async def ai_overview(req: PRTarget) -> JobIdResponse:
+    entry = _cached(req.owner, req.repo, req.number)
+    return JobIdResponse(
+        job_id=jobs.start_overview(entry["pr"], entry["files"], entry["pr"].head_sha))
+
+
+@app.post("/overview/comment", response_model=OkResponse)
+def overview_comment(req: PRTarget) -> OkResponse:
+    stored = core.load_overview(req.owner, req.repo, req.number)
+    if not stored.get("markdown"):
+        raise _err(404, "no overview generated for this PR",
+                   "generate the overview first")
+    return OkResponse(ok=gh.post_pr_comment_file(
+        req.owner, req.repo, req.number, stored["markdown"]))
 
 
 # --- Mutating routes (sync: shell gh + persist under per-PR lock) -------------

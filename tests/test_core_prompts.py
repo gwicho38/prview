@@ -1,3 +1,4 @@
+import prview.core as core
 from prview.core import (
     FileDiff,
     PRInfo,
@@ -5,6 +6,7 @@ from prview.core import (
     build_ask_prompt,
     build_explain_prompt,
     build_explain_selection_prompt,
+    build_overview_prompt,
     build_summary_prompt,
 )
 
@@ -111,3 +113,50 @@ def test_explain_selection_prompt_caps_selection_only():
     prompt = build_explain_selection_prompt(pr, fd, "s" * 3000)
     assert "s" * 2000 in prompt and "s" * 2001 not in prompt   # selection still capped at 2000
     assert "z" * 9000 in prompt                                # diff now sent in full
+
+
+def _ov_pr(**kw):
+    base = dict(owner="o", repo="r", number=5, title="Queue consolidation",
+                author="gw", body="Fixes silent drops", head_sha="sha-a")
+    base.update(kw)
+    return core.PRInfo(**base)
+
+
+def test_overview_prompt_contains_header_and_file_table():
+    files = [core.FileDiff("a.py", "diff --git a/a.py b/a.py\n+x", additions=3, deletions=1),
+             core.FileDiff("b.py", "diff --git a/b.py b/b.py\n+y", additions=1, deletions=0)]
+    p = core.build_overview_prompt(_ov_pr(), files)
+    assert "Queue consolidation" in p
+    assert "Fixes silent drops" in p
+    assert "a.py (+3 -1)" in p
+    assert "b.py (+1 -0)" in p
+
+
+def test_overview_prompt_includes_diffs_and_instructions():
+    files = [core.FileDiff("a.py", "diff --git a/a.py b/a.py\n+real-diff-line", additions=1, deletions=0)]
+    p = core.build_overview_prompt(_ov_pr(), files)
+    assert "+real-diff-line" in p
+    assert "three sentences" in p
+    assert "ASCII" in p
+    assert "No mermaid" in p
+    assert "lifecycle" in p.lower()
+
+
+def test_overview_prompt_budget_omits_oversized_diffs():
+    huge = core.FileDiff("huge.py", "x" * (core._DIFF_LIMIT + 1), additions=9000, deletions=0)
+    small = core.FileDiff("small.py", "diff --git a/small.py b/small.py\n+tiny", additions=1, deletions=0)
+    p = core.build_overview_prompt(_ov_pr(), [huge, small])
+    assert "diffs omitted for 1 smaller files: huge.py" in p
+    assert "+tiny" in p            # smaller file still included after the skip
+    assert "x" * 1000 not in p     # huge diff body absent
+
+
+def test_overview_prompt_clips_body():
+    p = core.build_overview_prompt(_ov_pr(body="B" * 20_000), [])
+    assert "B" * core._OVERVIEW_BODY_LIMIT in p
+    assert "B" * (core._OVERVIEW_BODY_LIMIT + 1) not in p
+
+
+def test_overview_prompt_embeds_exemplars():
+    p = core.build_overview_prompt(_ov_pr(), [])
+    assert core._OVERVIEW_EXEMPLARS.strip() in p

@@ -336,3 +336,124 @@ def build_explain_selection_prompt(pr: PRInfo, fd: FileDiff, selection: str) -> 
         f"does, how it works mechanically, and why the change matters. Be concise and "
         f"specific to the highlighted lines — do not summarize the whole file."
     )
+
+
+_OVERVIEW_BODY_LIMIT = 8_000
+
+# Style/quality targets for the overview job, abridged from two hand-made
+# review comments on lyskdev/ultron#1272 (the motivating example). Structure
+# and density are the target — content is from another project.
+_OVERVIEW_EXEMPLARS = '''
+Example A — before/after pair (structure to imitate; emit ASCII, not mermaid):
+
+## Before / After — consolidation scheduling
+
+### Before — two independent clocks
+
+```
+ [Segment finalized] ──► finalized-segment count ──► consolidation window
+        │                                                  │
+        └──► extraction LLM call (variable latency) ──► fact persisted
+                                                           │
+             window already moved past the fact's segment? ▼
+             ❌ SILENTLY DROPPED — never revisited
+```
+
+### After — one durable FIFO queue
+
+```
+ [Segment finalized] ──► candidate persisted (status = pending)
+        │
+        ▼
+ consolidation cycle: pull pending (FIFO) ──► one LLM call per batch
+        │ success                                 │ error / unparseable
+        ▼                                         ▼
+ mark_consolidated ✅ ──► Event            stays pending, attempts += 1
+                                           attempts ≥ 5 ──► failed
+```
+
+**Net effect:** extraction lag now affects *when* an event appears, never *whether*.
+
+Example B — entity lifecycle (already ASCII; imitate the annotated edges):
+
+## Single candidate lifecycle — birth → event
+
+```
+ ┌─────────────────────┐
+ │  Utterance segment  │
+ │     finalized       │
+ └──────────┬──────────┘
+            ▼  candidate persisted
+ ╔═════════════════════╗
+ ║       PENDING       ║  consolidation_attempts = 0
+ ╚══╤═══════════╤══════╝
+    │           │ source segment soft-deleted
+    │           ▼
+    │       ╔═══════════╗
+    │       ║  SKIPPED  ║  terminal
+    │       ╚═══════════╝
+    │ picked up by cycle (FIFO)
+    ▼
+ one consolidation LLM call per batch
+    │ success              │ error / unparseable
+    ▼                      ▼
+ ╔══════════════╗      attempts += 1
+ ║ CONSOLIDATED ║──►Event   │ attempts < 5 → back to PENDING
+ ╚══════════════╝           │ attempts ≥ 5 ▼
+     terminal            ╔══════════╗
+                         ║  FAILED  ║  terminal, queryable
+                         ╚══════════╝
+```
+
+Key edge: crash between LLM success and mark_consolidated → replayed next cycle →
+dedup absorbs the duplicate. At-least-once by design.
+'''
+
+
+def build_overview_prompt(pr: PRInfo, files: list) -> str:
+    """Assemble the whole-PR orientation prompt: summary + two ASCII diagrams.
+
+    Files arrive server-sorted largest-first; whole per-file diffs are appended
+    greedily under the shared _DIFF_LIMIT budget, and every omission is stated
+    explicitly so the model never guesses at hidden changes.
+    """
+    table = "\n".join(f"- {f.filename} (+{f.additions} -{f.deletions})" for f in files)
+    header = (
+        f"PR #{pr.number}: {pr.title} by {pr.author}\n\n"
+        f"Description:\n{pr.body[:_OVERVIEW_BODY_LIMIT]}\n\n"
+        f"Changed files ({len(files)}):\n{table}\n\n"
+    )
+
+    blocks, used, omitted = [], 0, []
+    for f in files:
+        block = f"### {f.filename}\n```diff\n{f.diff_text}\n```\n"
+        if used + len(block) > _DIFF_LIMIT:
+            omitted.append(f.filename)
+            continue
+        used += len(block)
+        blocks.append(block)
+    diffs = "Diffs of the largest changed files:\n" + "".join(blocks)
+    if omitted:
+        diffs += f"\n[diffs omitted for {len(omitted)} smaller files: {', '.join(omitted)}]\n"
+
+    instructions = (
+        "You are orienting a code reviewer who has not read this PR yet. Produce\n"
+        "GitHub-flavored markdown with exactly these three parts, in order:\n\n"
+        "1. Orientation summary — exactly three sentences: what changed, why, and\n"
+        "   what to read first.\n"
+        "2. Before/After diagram pair — two ASCII diagrams (headed '### Before' and\n"
+        "   '### After') showing the system/data-flow state prior to this change and\n"
+        "   after it. Pick the diagram type that best fits the change shape:\n"
+        "   sequence, module map, state machine, entity-relationship, or flowchart.\n"
+        "3. Entity lifecycle diagram — one ASCII diagram tracing the primary domain\n"
+        "   entity this PR touches from creation to its terminal state(s), including\n"
+        "   retry, failure, and edge paths.\n\n"
+        "Hard rules:\n"
+        "- Every diagram is plain ASCII (box-drawing characters welcome) inside a\n"
+        "  fenced code block.\n"
+        "- No mermaid, no HTML, no images.\n"
+        "- Keep lines inside fenced blocks under 100 characters.\n"
+        "- Annotate diagram edges with the condition that triggers them.\n"
+    )
+
+    return header + diffs + "\n" + instructions + "\n" + _OVERVIEW_EXEMPLARS

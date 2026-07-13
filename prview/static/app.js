@@ -101,6 +101,7 @@ function prUrl() {
 // ----------------------------------------------------------------------------
 const Screens = {
   landing: document.getElementById("screen-landing"),
+  overview: document.getElementById("screen-overview"),
   review: document.getElementById("screen-review"),
   repowise: document.getElementById("screen-repowise"),
   submit: document.getElementById("screen-submit"),
@@ -110,11 +111,40 @@ let activeScreen = "landing";
 function show(screen) {
   activeScreen = screen;
   for (const [name, el] of Object.entries(Screens)) el.hidden = name !== screen;
+  syncHash(screen);
   if (screen === "landing") loadResumeList();
   if (screen === "submit") renderSubmit();
   if (screen === "review") renderSummary();
+  if (screen === "overview") { renderSummary(); renderOverview(); }
   if (screen === "repowise") { renderSummary(); renderRepowise(); }
 }
+
+// Hash routing: the URL mirrors the active tab so #overview/#review/#repowise
+// deep-link. replaceState (not assignment) avoids history spam and re-entrant
+// hashchange events; landing clears the hash.
+function syncHash(screen) {
+  const want = screen === "landing" ? "" : `#${screen}`;
+  if (location.hash !== want) {
+    history.replaceState(null, "", location.pathname + location.search + want);
+  }
+}
+
+function tabOrder() {
+  return State.standalone ? ["review", "repowise"] : ["overview", "review", "repowise"];
+}
+
+function initialTab() {
+  const h = location.hash.replace(/^#/, "");
+  if (tabOrder().includes(h)) return h;
+  return State.standalone ? "review" : "overview";
+}
+
+function renderOverview() {}
+
+window.addEventListener("hashchange", () => {
+  const h = location.hash.replace(/^#/, "");
+  if (State.pr && tabOrder().includes(h) && h !== activeScreen) show(h);
+});
 
 // ----------------------------------------------------------------------------
 // Toast + ARIA live announcements.
@@ -297,7 +327,8 @@ function enterReview(data) {
   State.rw = null;
   applyReviewToFiles();
   State.idx = firstUnviewedIndex();
-  show("review");
+  State.ov = null;
+  show(initialTab());
   renderSummary();
   renderFileList();
   selectFile(State.idx);
@@ -349,8 +380,8 @@ function buildNavTabs() {
   const tabs = document.createElement("div");
   tabs.className = "nav-tabs";
   tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", "Review or Repowise");
-  const active = activeScreen === "repowise" ? "repowise" : "review";
+  tabs.setAttribute("aria-label", "Overview, Review, or Repowise");
+  const active = tabOrder().includes(activeScreen) ? activeScreen : "review";
   const mk = (key, label) => {
     const b = document.createElement("button");
     b.className = "nav-tab";
@@ -367,6 +398,7 @@ function buildNavTabs() {
     b.addEventListener("click", () => { if (key !== active) show(key); });
     return b;
   };
+  if (!State.standalone) tabs.append(mk("overview", "Overview"));
   tabs.append(mk("review", "Review"), mk("repowise", "Repowise"));
   const hint = document.createElement("span");
   hint.className = "kbd nav-tabs-hint";
@@ -383,7 +415,9 @@ function renderSummary() {
   if (!State.pr) return;
   const pr = State.pr;
   const el = document.getElementById(
-    activeScreen === "repowise" ? "pr-summary-repowise" : "pr-summary");
+    activeScreen === "repowise" ? "pr-summary-repowise"
+      : activeScreen === "overview" ? "pr-summary-overview"
+      : "pr-summary");
   if (!el) return;
   el.innerHTML = "";
 
@@ -2515,16 +2549,22 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-  // g toggles Review ⇄ Repowise on either tab (mnemonic: "go to").
-  if (e.key === "g" && !isTyping(e) && (activeScreen === "review" || activeScreen === "repowise")) {
+  // g cycles Overview → Review → Repowise (Overview absent in standalone).
+  if (e.key === "g" && !isTyping(e) && tabOrder().includes(activeScreen)) {
     if (activeScreen === "review" && diffSelection()) return; // selecting diff text
     e.preventDefault();
-    show(activeScreen === "repowise" ? "review" : "repowise");
+    const order = tabOrder();
+    show(order[(order.indexOf(activeScreen) + 1) % order.length]);
     return;
   }
 
   if (activeScreen === "submit") {
     if (e.key === "q" || e.key === "Escape") { if (!isTyping(e)) { e.preventDefault(); show("review"); } }
+    return;
+  }
+  if (activeScreen === "overview") {
+    // Overview is the primary screen — q/Esc exits to landing, like Review.
+    if ((e.key === "q" || e.key === "Escape") && !isTyping(e)) { e.preventDefault(); show("landing"); }
     return;
   }
   if (activeScreen === "repowise") {

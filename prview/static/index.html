@@ -57,6 +57,17 @@
       </div>
     </main>
 
+    <!-- screen:overview — AI-generated PR orientation (summary + diagrams) -->
+    <main class="screen" id="screen-overview" hidden>
+      <div class="overview-grid">
+        <!-- component:pr-summary (re-rendered, with nav-tabs) -->
+        <section class="pr-summary" id="pr-summary-overview" aria-label="Pull request summary"></section>
+
+        <!-- overview content region: loading | result | error -->
+        <section class="overview-region" id="overview-region" role="tabpanel" aria-label="PR overview"></section>
+      </div>
+    </main>
+
     <!-- screen:review -->
     <main class="screen" id="screen-review" hidden>
       <div class="review-grid">

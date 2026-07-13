@@ -722,6 +722,21 @@ a { color: var(--accent); }
   overflow: auto;
 }
 
+/* ---- screen:overview ---------------------------------------------------- */
+.overview-grid {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "summary" "region";
+  height: 100%;
+}
+#pr-summary-overview { grid-area: summary; }
+.overview-region {
+  grid-area: region;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 24px 28px;
+}
+
 /* ---- Toast ------------------------------------------------------------- */
 .toast-stack { position: fixed; bottom: 22px; right: 22px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
 .toast {

@@ -152,3 +152,33 @@ def test_cancel_terminates_popen_child():
 
 def test_get_job_unknown_returns_none():
     assert jobs.get_job("no-such-id") is None
+
+
+def test_start_overview_persists_cache_on_done(tmp_path, monkeypatch):
+    from prview import core
+    monkeypatch.setattr(core, "_CACHE_DIR", tmp_path)
+    pr = PRInfo(owner="o", repo="r", number=3, title="t", author="a", head_sha="sha-xyz")
+    files = [FileDiff("a.py", "diff --git a/a.py b/a.py\n+x", additions=1)]
+    with patch("prview.jobs.subprocess.Popen", SuccessPopen):
+        job_id = jobs.start_overview(pr, files, "sha-xyz")
+        snap = _wait_status(job_id, "done")
+    assert snap["status"] == "done"
+    deadline = time.time() + 2.0
+    stored = {}
+    while time.time() < deadline:
+        stored = core.load_overview("o", "r", 3)
+        if stored:
+            break
+        time.sleep(0.005)
+    assert stored["sha"] == "sha-xyz"
+    assert stored["markdown"] == "the answer"
+
+
+def test_on_done_exception_leaves_job_done():
+    def boom(result):
+        raise RuntimeError("cache write failed")
+    with patch("prview.jobs.subprocess.Popen", SuccessPopen):
+        job_id = jobs.start_job("overview", "prompt", timeout=5, on_done=boom)
+        snap = _wait_status(job_id, "done")
+    assert snap["status"] == "done"
+    assert snap["error"] is None

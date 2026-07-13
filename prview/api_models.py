@@ -130,6 +130,7 @@ class PRInfoModel(BaseModel):
     body: str = ""
     base: str = ""
     head: str = ""
+    head_sha: str = ""
     state: str = ""
     review_decision: str = ""
     ci_status: str = ""
@@ -384,3 +385,9 @@ class DocgenSnapshot(BaseModel):
     progress: str | None = None
     error: str | None = None
     log_tail: str | None = None
+
+
+class OverviewModel(BaseModel):
+    markdown: str | None = None
+    sha: str | None = None
+    stale: bool = False

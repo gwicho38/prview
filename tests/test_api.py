@@ -25,12 +25,13 @@ def client(tmp_path, monkeypatch):
     return c
 
 
-def _fake_pr():
+def _fake_pr(head_sha="sha-a"):
     return core.PRInfo(
         owner="octo", repo="hello", number=7,
         title="Add feature", author="alice", body="desc",
         base="main", head="feat", state="OPEN",
         additions=10, deletions=2, changed_files=2,
+        head_sha=head_sha,
     )
 
 
@@ -63,6 +64,12 @@ def test_post_pr_happy_path(client, monkeypatch):
     # NO diff_text in the list response
     assert all("diff_text" not in f for f in data["files"])
     assert data["state"]["comments"] == 0
+
+
+def test_pr_response_carries_head_sha(client, monkeypatch):
+    resp = _load_pr(client, monkeypatch)
+    assert resp.status_code == 200
+    assert resp.json()["pr"]["head_sha"] == "sha-a"
 
 
 def test_post_pr_gh_unauth_returns_structured_4xx(client, monkeypatch):
@@ -300,3 +307,64 @@ def test_file_full_surfaces_gh_error(client, monkeypatch):
     resp = client.get("/pr/octo/hello/7/file/full", params={"path": "big.py"})
     assert resp.status_code == 400
     assert "Failed to fetch file" in resp.json()["error"]
+
+
+def test_get_overview_no_cache(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    resp = client.get("/overview/octo/hello/7")
+    assert resp.status_code == 200
+    assert resp.json() == {"markdown": None, "sha": None, "stale": False}
+
+
+def test_get_overview_hit_and_sha_invalidation(client, monkeypatch):
+    _load_pr(client, monkeypatch)                      # head sha-a
+    core.save_overview("octo", "hello", 7, "sha-a", "## OV")
+    data = client.get("/overview/octo/hello/7").json()
+    assert data == {"markdown": "## OV", "sha": "sha-a", "stale": False}
+
+    # New head SHA → cached overview is stale → markdown withheld.
+    monkeypatch.setattr(gh, "fetch_pr_info", lambda o, r, n: _fake_pr(head_sha="sha-b"))
+    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n: _fake_diff())
+    client.post("/pr", json={"ref": "octo/hello#7"})
+    data = client.get("/overview/octo/hello/7").json()
+    assert data == {"markdown": None, "sha": "sha-a", "stale": True}
+
+
+def test_get_overview_409_when_pr_not_loaded(client):
+    assert client.get("/overview/octo/hello/7").status_code == 409
+
+
+def test_post_ai_overview_starts_job(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    calls = {}
+
+    def fake_start(pr, files, sha):
+        calls["args"] = (pr.owner, len(files), sha)
+        return "job-1"
+
+    monkeypatch.setattr(jobs, "start_overview", fake_start)
+    resp = client.post("/ai/overview", json={"owner": "octo", "repo": "hello", "number": 7})
+    assert resp.status_code == 200
+    assert resp.json()["job_id"] == "job-1"
+    assert calls["args"] == ("octo", 2, "sha-a")
+
+
+def test_post_overview_comment_404_without_cache(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    resp = client.post("/overview/comment", json={"owner": "octo", "repo": "hello", "number": 7})
+    assert resp.status_code == 404
+
+
+def test_post_overview_comment_posts_stored_markdown(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    core.save_overview("octo", "hello", 7, "sha-a", "## OV body")
+    posted = {}
+
+    def fake_post(owner, repo, number, body):
+        posted["body"] = body
+        return True
+
+    monkeypatch.setattr(gh, "post_pr_comment_file", fake_post)
+    resp = client.post("/overview/comment", json={"owner": "octo", "repo": "hello", "number": 7})
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    assert posted["body"] == "## OV body"

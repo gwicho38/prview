@@ -21,7 +21,9 @@ from prview.core import (
     build_ask_prompt,
     build_explain_prompt,
     build_explain_selection_prompt,
+    build_overview_prompt,
     build_summary_prompt,
+    save_overview,
 )
 
 
@@ -50,7 +52,7 @@ def _claude_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
 
-def _run_claude(job: AIJob, prompt: str, timeout: int):
+def _run_claude(job: AIJob, prompt: str, timeout: int, on_done=None):
     """The Popen wrapper. Intentional deviation from source `invoke_claude`:
     source used a blocking `subprocess.run`; we hold a `subprocess.Popen` kill
     handle so POST /job/{id}/cancel can terminate the child. The argv, env
@@ -94,6 +96,7 @@ def _run_claude(job: AIJob, prompt: str, timeout: int):
                 job.error = str(exc)
         return
 
+    succeeded = False
     with job._lock:
         if job.status == "cancelled":
             return
@@ -103,14 +106,22 @@ def _run_claude(job: AIJob, prompt: str, timeout: int):
         else:
             job.status = "done"
             job.result = out.strip()
+            succeeded = True
+    # Persistence hook runs outside the lock; a failing hook never flips a
+    # done job to error — the result already belongs to the caller.
+    if succeeded and on_done is not None:
+        try:
+            on_done(job.result)
+        except Exception:
+            pass
 
 
-def start_job(kind: str, prompt: str, timeout: int) -> str:
+def start_job(kind: str, prompt: str, timeout: int, on_done=None) -> str:
     """Mint a job, run the Popen wrapper on a background thread, return its id."""
     job = AIJob(id=str(uuid.uuid4()), kind=kind, started_at=time.time())
     jobs[job.id] = job
     threading.Thread(
-        target=_run_claude, args=(job, prompt, timeout), daemon=True,
+        target=_run_claude, args=(job, prompt, timeout, on_done), daemon=True,
     ).start()
     return job.id
 
@@ -146,7 +157,7 @@ def cancel_job(job_id: str) -> bool:
     return True
 
 
-_KIND_TIMEOUTS = {"summary": 60, "explain": 300, "ask": 300, "explain-selection": 300}
+_KIND_TIMEOUTS = {"summary": 60, "explain": 300, "ask": 300, "explain-selection": 300, "overview": 300}
 
 
 def start_summary(pr: PRInfo, fd: FileDiff) -> str:
@@ -168,3 +179,11 @@ def start_explain_selection(pr: PRInfo, fd: FileDiff, selection: str) -> str:
         build_explain_selection_prompt(pr, fd, selection),
         timeout=_KIND_TIMEOUTS["explain-selection"],
     )
+
+
+def start_overview(pr: PRInfo, files: list[FileDiff], sha: str) -> str:
+    """Whole-PR orientation job; persists the result under the submit-time SHA."""
+    def persist(result: str):
+        save_overview(pr.owner, pr.repo, pr.number, sha, result)
+    return start_job("overview", build_overview_prompt(pr, files),
+                     timeout=_KIND_TIMEOUTS["overview"], on_done=persist)

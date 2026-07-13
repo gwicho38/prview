@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+import prview.gh as gh
 from prview.core import PRInfo
 from prview.gh import (
     GhError,
@@ -168,3 +169,46 @@ def test_mark_file_viewed_id_lookup_failure_returns_false():
     with patch("prview.gh.subprocess.run", return_value=_Result(returncode=1, stderr="x")):
         ok = mark_file_viewed("o", "r", 42, "src/app.py")
     assert ok is False
+
+
+def test_fetch_pr_info_parses_head_ref_oid(monkeypatch):
+    import json as _json
+    import subprocess as _sp
+
+    captured = {}
+
+    def fake_run(cmd):
+        captured["cmd"] = cmd
+        payload = {
+            "title": "t", "author": {"login": "a"}, "body": "b",
+            "baseRefName": "main", "headRefName": "feat", "state": "OPEN",
+            "reviewDecision": "", "statusCheckRollup": [],
+            "additions": 1, "deletions": 1, "changedFiles": 1,
+            "headRefOid": "abc123def456",
+        }
+        return _sp.CompletedProcess(cmd, 0, stdout=_json.dumps(payload), stderr="")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    pr = gh.fetch_pr_info("o", "r", 1)
+    assert pr.head_sha == "abc123def456"
+    assert "headRefOid" in captured["cmd"][captured["cmd"].index("--json") + 1]
+
+
+def test_post_pr_comment_file_uses_body_file(monkeypatch):
+    import subprocess as _sp
+    from pathlib import Path as _P
+
+    captured = {}
+
+    def fake_run(cmd):
+        captured["cmd"] = cmd
+        idx = cmd.index("--body-file")
+        captured["content"] = _P(cmd[idx + 1]).read_text()
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    body = "## Overview\n```\n┌box┐\n└───┘\n```"
+    assert gh.post_pr_comment_file("o", "r", 9, body) is True
+    assert captured["cmd"][:4] == ["gh", "pr", "comment", "9"]
+    assert "--repo" in captured["cmd"] and "o/r" in captured["cmd"]
+    assert captured["content"] == body

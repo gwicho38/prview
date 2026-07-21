@@ -29,3 +29,9 @@ def test_submit_toast_links_to_review():
     assert 'toast("Review submitted", "success", { href: res.url || prUrl() })' in APP_JS
     assert "opts.href" in APP_JS
     assert '"toast-link"' in APP_JS
+
+
+def test_wrap_lines_toggle_persists_and_applies_data_attribute():
+    assert 'const WRAP_KEY = "prview:wrap-lines";' in APP_JS
+    assert 'document.documentElement.setAttribute("data-wrap", "on")' in APP_JS
+    assert '"fd-view-btn fd-wrap-btn"' in APP_JS

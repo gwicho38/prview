@@ -35,3 +35,10 @@ def test_wrap_lines_toggle_persists_and_applies_data_attribute():
     assert 'const WRAP_KEY = "prview:wrap-lines";' in APP_JS
     assert 'document.documentElement.setAttribute("data-wrap", "on")' in APP_JS
     assert '"fd-view-btn fd-wrap-btn"' in APP_JS
+
+
+def test_syntax_highlighting_wired_into_diff_and_full_file_views():
+    assert "highlight: true" in APP_JS
+    assert "}, window.hljs);" in APP_JS
+    assert 'window.hljs.getLanguage(ext)' in APP_JS
+    assert 'window.hljs.highlight(text, { language: ext, ignoreIllegals: true })' in APP_JS

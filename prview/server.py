@@ -31,6 +31,7 @@ import prview.jobs as jobs
 import prview.repowise as repowise
 import prview.state_store as state_store
 from prview.api_models import (
+    ArchiveRequest,
     AskRequest,
     CommentRequest,
     ExplainSelectionRequest,
@@ -345,6 +346,16 @@ def submit_review(req: SubmitRequest) -> SubmitResponse:
     return SubmitResponse(ok=False, error=err or "review submission failed")
 
 
+@app.post("/review/archive", response_model=OkResponse)
+def archive_review(req: ArchiveRequest) -> OkResponse:
+    def mutate(state: dict) -> dict:
+        state["archived"] = req.archived
+        return state
+
+    state_store.mutate_state(req.owner, req.repo, req.number, mutate)
+    return OkResponse(ok=True)
+
+
 # --- Read routes (sync: read state from disk) ---------------------------------
 
 @app.get("/state/{owner}/{repo}/{n}", response_model=ReviewStateModel)
@@ -353,8 +364,8 @@ def get_state(owner: str, repo: str, n: int) -> ReviewStateModel:
 
 
 @app.get("/reviews", response_model=list[ResumableRow])
-def list_reviews() -> list[ResumableRow]:
-    return [ResumableRow(**row) for row in state_store.list_resumable()]
+def list_reviews(include_archived: bool = False) -> list[ResumableRow]:
+    return [ResumableRow(**row) for row in state_store.list_resumable(include_archived)]
 
 
 # --- Repowise (G2) -------------------------------------------------------------

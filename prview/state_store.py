@@ -51,12 +51,16 @@ def mutate_state(owner: str, repo: str, number: int, fn) -> dict:
         return new_state
 
 
-def list_resumable() -> list[dict]:
+def list_resumable(include_archived: bool = False) -> list[dict]:
     """Scan the state dir for resumable reviews (GET /reviews).
 
     Reads each PR's identity from the blob contents (written by mutate_state),
     not from the filename — the `{owner}-{repo}-{number}.json` scheme is
     ambiguous for hyphenated owner/repo names.
+
+    Archived reviews are soft-hidden: excluded by default, included when
+    `include_archived` is set (so the "show archived" view can list and
+    unarchive them without losing any saved progress).
     """
     state_dir = core._CACHE_DIR
     if not state_dir.exists():
@@ -71,6 +75,9 @@ def list_resumable() -> list[dict]:
         owner, repo, number = blob.get("owner"), blob.get("repo"), blob.get("number")
         if owner is None or repo is None or number is None:
             continue  # written before identity was persisted; skip rather than guess
+        archived = bool(blob.get("archived", False))
+        if archived and not include_archived:
+            continue
         rows.append({
             "owner": owner,
             "repo": repo,
@@ -78,5 +85,6 @@ def list_resumable() -> list[dict]:
             "viewed_count": len(blob.get("viewed", [])),
             "flagged_count": len(blob.get("flagged", {})),
             "submitted": bool(blob.get("submitted", False)),
+            "archived": archived,
         })
     return rows

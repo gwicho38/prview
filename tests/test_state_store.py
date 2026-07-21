@@ -96,13 +96,30 @@ def test_list_resumable_scans_state_dir(tmp_path, monkeypatch):
 
     assert by_number[7] == {
         "owner": "octo", "repo": "cat", "number": 7,
-        "viewed_count": 2, "flagged_count": 1, "submitted": True,
+        "viewed_count": 2, "flagged_count": 1, "submitted": True, "archived": False,
     }
     assert by_number[12]["owner"] == "octo"
     assert by_number[12]["repo"] == "dog"
     assert by_number[12]["viewed_count"] == 1
     assert by_number[12]["flagged_count"] == 0
     assert by_number[12]["submitted"] is False
+    assert by_number[7]["archived"] is False
+
+
+def test_list_resumable_hides_archived_unless_requested(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_CACHE_DIR", tmp_path / "state")
+    state_store.reset_locks()
+    mutate_state("octo", "cat", 7, lambda s: {**s, "viewed": ["a.py"]})
+    mutate_state("octo", "dog", 12, lambda s: {**s, "viewed": ["x.py"], "archived": True})
+
+    active = list_resumable()
+    assert {r["number"] for r in active} == {7}
+
+    everything = list_resumable(include_archived=True)
+    by_number = {r["number"]: r for r in everything}
+    assert set(by_number) == {7, 12}
+    assert by_number[7]["archived"] is False
+    assert by_number[12]["archived"] is True
 
 
 def test_cache_set_get_and_miss_sentinel():

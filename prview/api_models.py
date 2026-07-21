@@ -238,6 +238,11 @@ class ResumableRow(BaseModel):
     viewed_count: int
     flagged_count: int
     submitted: bool
+    archived: bool = False
+
+
+class ArchiveRequest(PRTarget):
+    archived: bool = True
 
 
 # ---------------------------------------------------------------------------

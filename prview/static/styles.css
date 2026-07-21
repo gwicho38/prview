@@ -184,6 +184,18 @@ a { color: var(--accent); }
 .field-error[hidden] { display: none; }
 
 .section-title { margin: 28px 0 10px; font-size: 13px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.section-title-row { display: flex; align-items: baseline; justify-content: space-between; }
+.section-title-row .section-title { margin: 28px 0 10px; }
+.link-btn {
+  background: none;
+  border: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.link-btn:hover { color: var(--fg); }
 .resume-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .resume-empty { padding: 16px; color: var(--fg-muted); }
 .resume-row {
@@ -191,21 +203,42 @@ a { color: var(--accent); }
   align-items: center;
   gap: 14px;
   width: 100%;
+  padding: 0;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.resume-row:last-child { border-bottom: 0; }
+.resume-row-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   padding: 12px 14px;
-  background: var(--bg-elev);
+  background: none;
   border: 0;
-  border-bottom: 1px solid var(--border);
   color: var(--fg);
   cursor: pointer;
   font-family: var(--mono);
   font-size: 13px;
 }
-.resume-row:last-child { border-bottom: 0; }
 .resume-row:hover { background: var(--bg-elev-2); }
 .resume-ref { font-weight: 600; min-width: 160px; }
 .resume-meta { color: var(--fg-muted); margin-left: auto; }
 .resume-arrow { color: var(--fg-dim); }
+.resume-archive-btn {
+  flex-shrink: 0;
+  margin-right: 12px;
+  padding: 6px 10px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.resume-archive-btn:hover { color: var(--fg); border-color: var(--fg-dim); }
 
 /* ---- Badges / glyphs --------------------------------------------------- */
 .badge {

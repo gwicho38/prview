@@ -279,6 +279,29 @@ def test_state_and_reviews(client, monkeypatch):
     assert any(row["owner"] == "octo" and row["number"] == 7 for row in rows)
 
 
+def test_archive_review_hides_then_unarchive_restores(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "mark_file_viewed", lambda o, r, n, p: True)
+    client.post("/file/viewed", json={"owner": "octo", "repo": "hello", "number": 7, "path": "big.py"})
+
+    resp = client.post("/review/archive", json={"owner": "octo", "repo": "hello", "number": 7})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    active = client.get("/reviews").json()
+    assert not any(row["number"] == 7 for row in active)
+
+    everything = client.get("/reviews", params={"include_archived": True}).json()
+    row = next(row for row in everything if row["number"] == 7)
+    assert row["archived"] is True
+    assert row["viewed_count"] == 1  # progress survives the archive
+
+    resp = client.post("/review/archive", json={"owner": "octo", "repo": "hello", "number": 7, "archived": False})
+    assert resp.status_code == 200
+    restored = client.get("/reviews").json()
+    assert any(row["number"] == 7 and row["archived"] is False for row in restored)
+
+
 def test_file_full_returns_content_and_added_lines(client, monkeypatch):
     _load_pr(client, monkeypatch)
     monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "headsha")

@@ -266,28 +266,40 @@ function setTheme(theme) {
 document.getElementById("theme-toggle").addEventListener("click",
   () => setTheme(currentTheme() === "light" ? "dark" : "light"));
 
+let showArchivedReviews = false;
+
 async function loadResumeList() {
   const list = document.getElementById("resume-list");
+  const toggleBtn = document.getElementById("toggle-archived-btn");
+  toggleBtn.textContent = showArchivedReviews ? "Hide archived" : "Show archived";
   list.innerHTML = "";
   let rows = [];
-  try { rows = await api("GET", "/reviews"); } catch { rows = []; }
+  try {
+    rows = await api("GET", `/reviews?include_archived=${showArchivedReviews}`);
+  } catch { rows = []; }
+  if (!showArchivedReviews) rows = rows.filter((r) => !r.archived);
   if (!rows.length) {
     const empty = document.createElement("div");
     empty.className = "resume-empty";
-    empty.textContent = "No saved reviews yet. Load a PR to begin.";
+    empty.textContent = showArchivedReviews
+      ? "No archived reviews."
+      : "No saved reviews yet. Load a PR to begin.";
     list.appendChild(empty);
     return;
   }
   for (const r of rows) {
     const ref = `${r.owner}/${r.repo}#${r.number}`;
-    const btn = document.createElement("button");
-    btn.className = "resume-row";
-    btn.setAttribute("role", "listitem");
+    const row = document.createElement("div");
+    row.className = "resume-row";
+    row.setAttribute("role", "listitem");
+
+    const main = document.createElement("button");
+    main.className = "resume-row-main";
 
     const refEl = document.createElement("span");
     refEl.className = "resume-ref";
     refEl.textContent = ref;
-    btn.appendChild(refEl);
+    main.appendChild(refEl);
 
     const meta = document.createElement("span");
     meta.className = "resume-meta";
@@ -300,18 +312,44 @@ async function loadResumeList() {
       const total = r.total != null ? `/${r.total}` : "";
       meta.textContent = `${r.viewed_count}${total} viewed · ${r.flagged_count} flagged`;
     }
-    btn.appendChild(meta);
+    main.appendChild(meta);
 
     const arrow = document.createElement("span");
     arrow.className = "resume-arrow";
     arrow.textContent = "→";
     arrow.setAttribute("aria-hidden", "true");
-    btn.appendChild(arrow);
+    main.appendChild(arrow);
 
-    btn.addEventListener("click", () => resumeReview(r.owner, r.repo, r.number));
-    list.appendChild(btn);
+    main.addEventListener("click", () => resumeReview(r.owner, r.repo, r.number));
+    row.appendChild(main);
+
+    const archiveBtn = document.createElement("button");
+    archiveBtn.className = "resume-archive-btn";
+    archiveBtn.textContent = r.archived ? "Unarchive" : "Archive";
+    archiveBtn.title = r.archived ? "Move back into the active list" : "Hide from the active list";
+    archiveBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      archiveReview(r.owner, r.repo, r.number, !r.archived);
+    });
+    row.appendChild(archiveBtn);
+
+    list.appendChild(row);
   }
 }
+
+async function archiveReview(owner, repo, number, archived) {
+  try {
+    await api("POST", "/review/archive", { owner, repo, number, archived });
+    loadResumeList();
+  } catch (e) {
+    toast(e.message, "error");
+  }
+}
+
+document.getElementById("toggle-archived-btn").addEventListener("click", () => {
+  showArchivedReviews = !showArchivedReviews;
+  loadResumeList();
+});
 
 async function resumeReview(owner, repo, number) {
   try {

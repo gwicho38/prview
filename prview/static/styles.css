@@ -12,6 +12,7 @@
   --green: #3fb950;
   --red: #f85149;
   --yellow: #d29922;
+  --purple: #a371f7;
   --flag: #db6d28;
   --focus: #58a6ff;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -34,6 +35,7 @@
   --green: #1a7f37;
   --red: #cf222e;
   --yellow: #9a6700;
+  --purple: #8250df;
   --flag: #bc4c00;
   --focus: #0969da;
 }
@@ -262,6 +264,7 @@ a { color: var(--accent); }
 .glyph-none { color: var(--fg-dim); }
 .glyph-approved { color: var(--green); }
 .glyph-changes { color: var(--red); }
+.glyph-merged { color: var(--purple); }
 
 /* ---- Review layout (three-region grid) --------------------------------- */
 .review-grid {

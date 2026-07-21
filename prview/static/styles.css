@@ -515,6 +515,50 @@ html[data-wrap="on"] .diff-region .fullfile td.ff-code {
 /* The filename already shows in .fd-header above the panel — hide diff2html's
    own per-file header to avoid showing it twice. */
 .diff-region .d2h-file-header { display: none; }
+/* Syntax highlighting (vendored highlight.js) — GitHub's own token palette, so
+   a highlighted diff here matches what reviewers already know from github.com.
+   Backgrounds stay whatever the diff/full-file row already set (added/removed
+   wash, etc.) — these rules only ever set foreground color. Base values are
+   GitHub's dark palette (the app's default theme); the light override below
+   swaps in GitHub's light palette, same pattern as the rest of the theme. */
+.diff-region .hljs-comment, .diff-region .hljs-quote { color: var(--fg-muted); }
+.diff-region .hljs-keyword, .diff-region .hljs-selector-tag, .diff-region .hljs-subst { color: #ff7b72; }
+.diff-region .hljs-number, .diff-region .hljs-literal, .diff-region .hljs-variable,
+.diff-region .hljs-template-variable, .diff-region .hljs-tag .hljs-attr,
+.diff-region .hljs-built_in, .diff-region .hljs-builtin-name { color: #79c0ff; }
+.diff-region .hljs-string, .diff-region .hljs-doctag, .diff-region .hljs-regexp,
+.diff-region .hljs-link { color: #a5d6ff; }
+.diff-region .hljs-title, .diff-region .hljs-section, .diff-region .hljs-selector-id,
+.diff-region .hljs-symbol, .diff-region .hljs-bullet { color: #d2a8ff; }
+.diff-region .hljs-type, .diff-region .hljs-class .hljs-title { color: #ffa657; }
+.diff-region .hljs-tag, .diff-region .hljs-name, .diff-region .hljs-attribute { color: #7ee787; }
+.diff-region .hljs-meta { color: var(--fg-muted); }
+.diff-region .hljs-emphasis { font-style: italic; }
+.diff-region .hljs-strong { font-weight: 700; }
+:root[data-theme="light"] .diff-region .hljs-keyword,
+:root[data-theme="light"] .diff-region .hljs-selector-tag,
+:root[data-theme="light"] .diff-region .hljs-subst { color: #cf222e; }
+:root[data-theme="light"] .diff-region .hljs-number,
+:root[data-theme="light"] .diff-region .hljs-literal,
+:root[data-theme="light"] .diff-region .hljs-variable,
+:root[data-theme="light"] .diff-region .hljs-template-variable,
+:root[data-theme="light"] .diff-region .hljs-tag .hljs-attr,
+:root[data-theme="light"] .diff-region .hljs-built_in,
+:root[data-theme="light"] .diff-region .hljs-builtin-name { color: #0550ae; }
+:root[data-theme="light"] .diff-region .hljs-string,
+:root[data-theme="light"] .diff-region .hljs-doctag,
+:root[data-theme="light"] .diff-region .hljs-regexp,
+:root[data-theme="light"] .diff-region .hljs-link { color: #0a3069; }
+:root[data-theme="light"] .diff-region .hljs-title,
+:root[data-theme="light"] .diff-region .hljs-section,
+:root[data-theme="light"] .diff-region .hljs-selector-id,
+:root[data-theme="light"] .diff-region .hljs-symbol,
+:root[data-theme="light"] .diff-region .hljs-bullet { color: #8250df; }
+:root[data-theme="light"] .diff-region .hljs-type,
+:root[data-theme="light"] .diff-region .hljs-class .hljs-title { color: #953800; }
+:root[data-theme="light"] .diff-region .hljs-tag,
+:root[data-theme="light"] .diff-region .hljs-name,
+:root[data-theme="light"] .diff-region .hljs-attribute { color: #116329; }
 .diff-placeholder { padding: 24px; text-align: center; color: var(--fg-muted); font-family: var(--mono); }
 .diff-loading { padding: 24px; text-align: center; color: var(--fg-muted); }
 

@@ -960,17 +960,28 @@ async function loadFullFile(path, region) {
     return;
   }
   if (path !== currentFile().filename) return;
-  renderFullFile(full, region);
+  renderFullFile(full, region, path);
 }
 
 // Render every line of the file with line numbers; highlight the lines this PR
-// added. Built via DOM/textContent only (file content is untrusted) → XSS-safe.
-function renderFullFile(full, region) {
+// added, plus syntax highlighting via vendored highlight.js when the file
+// extension maps to a supported language (falls back to plain text otherwise).
+// Each line is tokenized independently (matches diff2html's own per-line
+// approach), so a construct spanning multiple lines — a triple-quoted string,
+// a block comment — loses its highlight state at the line break. Accepted
+// trade-off: correct multi-line tokenization needs highlighting the whole file
+// once and re-splitting the resulting HTML by line, which risks splitting a
+// span's tags across rows.
+function renderFullFile(full, region, path) {
   region.innerHTML = "";
   const added = new Set(full.added_lines || []);
   const lines = String(full.content || "").split("\n");
   // Drop a single trailing empty element from a final newline.
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  // highlight.js resolves common file extensions via its own per-language alias
+  // list (e.g. "py" -> python, "rb" -> ruby) — no separate extension map needed.
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  const canHighlight = !!(window.hljs && window.hljs.getLanguage(ext));
   const table = document.createElement("table");
   table.className = "fullfile";
   const tb = document.createElement("tbody");
@@ -981,7 +992,15 @@ function renderFullFile(full, region) {
     const num = document.createElement("td");
     num.className = "ff-num"; num.textContent = String(n);
     const code = document.createElement("td");
-    code.className = "ff-code"; code.textContent = text;
+    code.className = canHighlight ? "ff-code hljs" : "ff-code";
+    if (canHighlight) {
+      // nosemgrep: javascript.browser.security.insecure-innerhtml -- hljs.highlight()
+      // HTML-escapes the source text itself before wrapping it in span tags, so its
+      // output is safe to assign as innerHTML even though the file content is untrusted.
+      code.innerHTML = window.hljs.highlight(text, { language: ext, ignoreIllegals: true }).value;
+    } else {
+      code.textContent = text;
+    }
     tr.append(num, code);
     tb.appendChild(tr);
   });
@@ -1008,8 +1027,9 @@ function renderDiff(detail, region) {
       // huge blank column. Line-by-line keeps it compact with no wasted space.
       outputFormat: "line-by-line",
       colorScheme: currentTheme(),  // follow the app's light/dark theme
-      highlight: false,         // vendored ui-base bundle has no highlight.js; would throw
-    });
+      // Degrade gracefully to plain text if the vendored highlight.js failed to load.
+      highlight: !!window.hljs,
+    }, window.hljs);
     ui.draw();
     injectInlineComments(region, currentFile());
   } catch {

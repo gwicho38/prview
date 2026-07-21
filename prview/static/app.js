@@ -266,6 +266,25 @@ function setTheme(theme) {
 document.getElementById("theme-toggle").addEventListener("click",
   () => setTheme(currentTheme() === "light" ? "dark" : "light"));
 
+// ---- wrap long lines (diff + full-file code view) --------------------------
+// Off by default (matches prior behavior: horizontal scroll per line). Persists
+// in localStorage like the theme; pure CSS toggle via data-wrap, no re-render.
+const WRAP_KEY = "prview:wrap-lines";
+function currentWrap() { return document.documentElement.getAttribute("data-wrap") === "on"; }
+function applyWrap(on) {
+  if (on) document.documentElement.setAttribute("data-wrap", "on");
+  else document.documentElement.removeAttribute("data-wrap");
+}
+function setWrap(on) {
+  applyWrap(on);
+  try { localStorage.setItem(WRAP_KEY, on ? "1" : "0"); } catch { /* best-effort */ }
+}
+(function initWrap() {
+  let saved;
+  try { saved = localStorage.getItem(WRAP_KEY); } catch { saved = null; }
+  applyWrap(saved === "1");
+})();
+
 let showArchivedReviews = false;
 
 async function loadResumeList() {
@@ -817,7 +836,18 @@ function renderFileDetail() {
     });
     viewSeg.appendChild(b);
   }
-  header.append(name, counts, viewSeg);
+
+  const wrapBtn = document.createElement("button");
+  wrapBtn.className = "fd-view-btn fd-wrap-btn" + (currentWrap() ? " is-active" : "");
+  wrapBtn.textContent = "Wrap";
+  wrapBtn.title = "Wrap long lines instead of scrolling horizontally";
+  wrapBtn.setAttribute("aria-pressed", String(currentWrap()));
+  wrapBtn.addEventListener("click", () => {
+    setWrap(!currentWrap());
+    wrapBtn.classList.toggle("is-active", currentWrap());
+    wrapBtn.setAttribute("aria-pressed", String(currentWrap()));
+  });
+  header.append(name, counts, viewSeg, wrapBtn);
 
   const aiPanel = document.createElement("div");
   aiPanel.className = "ai-panel";

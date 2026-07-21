@@ -581,8 +581,10 @@ function renderSummary() {
   const submit = document.createElement("button");
   submit.className = "btn btn-primary submit-entry";
   submit.innerHTML = 'Submit <span class="kbd">s</span>';
-  submit.disabled = prState.label !== "open";
-  submit.title = submit.disabled ? `Can't submit a review — this PR is ${prState.label}.` : "";
+  const prIsOpen = (pr.state || "").toUpperCase() === "OPEN";
+  submit.disabled = !prIsOpen;
+  if (submit.disabled) submit.title = `Can't submit a review — this PR is ${prState.label}.`;
+  else submit.removeAttribute("title");
   submit.addEventListener("click", () => show("submit"));
   // nav-tabs sit before .submit-entry so .submit-entry's margin-left:auto still
   // pins Submit to the far right.

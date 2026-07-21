@@ -50,4 +50,5 @@ def test_pr_lifecycle_state_badge_covers_open_merged_closed():
     assert "function prStateGlyph(state)" in APP_JS
     assert '`PR: <span class="${prState.cls}">${prState.g}</span> ${prState.label}`' in APP_JS
     # Submitting a review only makes sense while the PR is still open.
-    assert 'submit.disabled = prState.label !== "open";' in APP_JS
+    assert 'const prIsOpen = (pr.state || "").toUpperCase() === "OPEN";' in APP_JS
+    assert "submit.disabled = !prIsOpen;" in APP_JS

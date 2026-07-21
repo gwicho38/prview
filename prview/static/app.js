@@ -966,8 +966,12 @@ async function loadFullFile(path, region) {
 // Render every line of the file with line numbers; highlight the lines this PR
 // added, plus syntax highlighting via vendored highlight.js when the file
 // extension maps to a supported language (falls back to plain text otherwise).
-// hljs.highlight() escapes the source text itself before wrapping it in span
-// tags, so using its output as innerHTML stays XSS-safe on untrusted content.
+// Each line is tokenized independently (matches diff2html's own per-line
+// approach), so a construct spanning multiple lines — a triple-quoted string,
+// a block comment — loses its highlight state at the line break. Accepted
+// trade-off: correct multi-line tokenization needs highlighting the whole file
+// once and re-splitting the resulting HTML by line, which risks splitting a
+// span's tags across rows.
 function renderFullFile(full, region, path) {
   region.innerHTML = "";
   const added = new Set(full.added_lines || []);
@@ -990,6 +994,9 @@ function renderFullFile(full, region, path) {
     const code = document.createElement("td");
     code.className = canHighlight ? "ff-code hljs" : "ff-code";
     if (canHighlight) {
+      // nosemgrep: javascript.browser.security.insecure-innerhtml -- hljs.highlight()
+      // HTML-escapes the source text itself before wrapping it in span tags, so its
+      // output is safe to assign as innerHTML even though the file content is untrusted.
       code.innerHTML = window.hljs.highlight(text, { language: ext, ignoreIllegals: true }).value;
     } else {
       code.textContent = text;
@@ -1020,7 +1027,8 @@ function renderDiff(detail, region) {
       // huge blank column. Line-by-line keeps it compact with no wasted space.
       outputFormat: "line-by-line",
       colorScheme: currentTheme(),  // follow the app's light/dark theme
-      highlight: true,          // per-line syntax highlighting via vendored highlight.js
+      // Degrade gracefully to plain text if the vendored highlight.js failed to load.
+      highlight: !!window.hljs,
     }, window.hljs);
     ui.draw();
     injectInlineComments(region, currentFile());

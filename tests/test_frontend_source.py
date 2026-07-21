@@ -42,3 +42,12 @@ def test_syntax_highlighting_wired_into_diff_and_full_file_views():
     assert "}, window.hljs);" in APP_JS
     assert 'window.hljs.getLanguage(ext)' in APP_JS
     assert 'window.hljs.highlight(text, { language: ext, ignoreIllegals: true })' in APP_JS
+
+
+def test_pr_lifecycle_state_badge_covers_open_merged_closed():
+    assert "merged: { g:" in APP_JS
+    assert "closed: { g:" in APP_JS
+    assert "function prStateGlyph(state)" in APP_JS
+    assert '`PR: <span class="${prState.cls}">${prState.g}</span> ${prState.label}`' in APP_JS
+    # Submitting a review only makes sense while the PR is still open.
+    assert 'submit.disabled = prState.label !== "open";' in APP_JS

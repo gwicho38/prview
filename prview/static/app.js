@@ -439,6 +439,15 @@ const DECISION_GLYPH = {
 const DECISION_NONE = { g: "◷", cls: "glyph-none", label: "none yet" };
 function decisionGlyph(d) { return DECISION_GLYPH[(d || "").toLowerCase()] || DECISION_NONE; }
 
+// PR lifecycle badge — gh CLI's `state` field is one of OPEN / CLOSED / MERGED.
+const PR_STATE_GLYPH = {
+  open: { g: "●", cls: "glyph-pass", label: "open" },
+  merged: { g: "●", cls: "glyph-merged", label: "merged" },
+  closed: { g: "●", cls: "glyph-fail", label: "closed" },
+};
+const PR_STATE_NONE = { g: "○", cls: "glyph-none", label: "unknown" };
+function prStateGlyph(state) { return PR_STATE_GLYPH[(state || "").toLowerCase()] || PR_STATE_NONE; }
+
 // nav-tabs (Review / Repowise): a tablist that drives the router. Active tab is
 // glyph (▸) + accent underline + accent color — never color alone. The `g`
 // keycap mirrors the existing single-key shortcut affordances.
@@ -513,6 +522,7 @@ function renderSummary() {
 
   const ci = ciGlyph(pr.ci_status);
   const dec = decisionGlyph(pr.review_decision);
+  const prState = prStateGlyph(pr.state);
 
   const drawerBtn = document.createElement("button");
   drawerBtn.className = "btn btn-ghost drawer-toggle";
@@ -562,6 +572,8 @@ function renderSummary() {
 
   const statusRow = document.createElement("div");
   statusRow.className = "ps-status-row";
+  const prStateEl = document.createElement("span");
+  prStateEl.innerHTML = `PR: <span class="${prState.cls}">${prState.g}</span> ${prState.label}`;
   const ciEl = document.createElement("span");
   ciEl.innerHTML = `CI: <span class="${ci.cls}">${ci.g}</span> ${ci.label}`;
   const decEl = document.createElement("span");
@@ -569,10 +581,12 @@ function renderSummary() {
   const submit = document.createElement("button");
   submit.className = "btn btn-primary submit-entry";
   submit.innerHTML = 'Submit <span class="kbd">s</span>';
+  submit.disabled = prState.label !== "open";
+  submit.title = submit.disabled ? `Can't submit a review — this PR is ${prState.label}.` : "";
   submit.addEventListener("click", () => show("submit"));
   // nav-tabs sit before .submit-entry so .submit-entry's margin-left:auto still
   // pins Submit to the far right.
-  statusRow.append(ciEl, decEl, buildNavTabs(), submit);
+  statusRow.append(prStateEl, ciEl, decEl, buildNavTabs(), submit);
 
   el.append(title, meta, statusRow);
 }

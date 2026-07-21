@@ -64,6 +64,8 @@ def test_post_pr_happy_path(client, monkeypatch):
     # NO diff_text in the list response
     assert all("diff_text" not in f for f in data["files"])
     assert data["state"]["comments"] == 0
+    # PR lifecycle state (OPEN/CLOSED/MERGED) is exposed for the frontend's PR badge.
+    assert data["pr"]["state"] == "OPEN"
 
 
 def test_pr_response_carries_head_sha(client, monkeypatch):

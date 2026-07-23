@@ -900,23 +900,16 @@ function renderFileDetail() {
 
   if ((State.viewMode || "diff") === "full") loadFullFile(f.filename, diffRegion);
   else loadDiff(f.filename, diffRegion);
-  scheduleAutoSummary(f.filename);
+  resumeCachedSummary(f.filename);
 }
 
-// Auto-summary fires only if the reviewer stays on the file >3s, so flipping
-// through files doesn't spawn a claude job per file. A cached summary still
-// shows instantly; the timer is cleared whenever the file detail re-renders
-// (navigation), and the launch is gated on still being the current file.
-let _autoSummaryTimer = null;
-const AUTO_SUMMARY_DELAY_MS = 3000;
-function scheduleAutoSummary(path) {
-  if (_autoSummaryTimer) { clearTimeout(_autoSummaryTimer); _autoSummaryTimer = null; }
+// The AI summary is by-election (▶ button in the panel header) — opening a
+// file never spawns a claude job on its own. A cached/in-flight summary still
+// shows instantly so flipping back to an already-summarized file is free.
+function resumeCachedSummary(path) {
   const ai = aiFor(path);
-  if (ai.results.summary || ai.status === "running") { startSummary(path, false); return; } // cached/in-flight → show now
-  _autoSummaryTimer = setTimeout(() => {
-    _autoSummaryTimer = null;
-    if (isCurrent(path)) startSummary(path, false);
-  }, AUTO_SUMMARY_DELAY_MS);
+  if (ai.results.summary || ai.status === "running") startSummary(path, false);
+  else renderAiPanel(path); // fresh file → still render the idle panel with its ▶ Summary button
 }
 
 function buildActionBar(f) {
@@ -1387,17 +1380,32 @@ function renderAiPanel(path) {
   title.textContent = titleText;
   head.appendChild(title);
 
-  // Toggle button: Explain from summary; back to Summary from explain/ask.
-  const toggle = document.createElement("button");
-  toggle.className = "btn btn-ghost";
   if (ai.mode === "summary") {
-    toggle.innerHTML = 'Explain <span class="kbd">e</span>';
-    toggle.addEventListener("click", () => startExplain(path));
+    // Summary is by-election: ▶ launches it, ■ stops an in-flight run. No
+    // in-panel jump to Explain — that's the bottom action bar's job.
+    const summaryRunning = ai.status === "running" && ai.runningMode === "summary";
+    if (summaryRunning || ai.status === "idle") {
+      const playStop = document.createElement("button");
+      playStop.className = "btn btn-ghost";
+      if (summaryRunning) {
+        playStop.textContent = "■ Stop";
+        playStop.title = "Stop generating the summary";
+        playStop.addEventListener("click", () => cancelJob(path));
+      } else {
+        playStop.textContent = "▶ Summary";
+        playStop.title = "Generate the AI summary";
+        playStop.addEventListener("click", () => startSummary(path, false));
+      }
+      head.appendChild(playStop);
+    }
   } else {
+    // Back to Summary from explain/ask.
+    const toggle = document.createElement("button");
+    toggle.className = "btn btn-ghost";
     toggle.innerHTML = "Summary ◂";
     toggle.addEventListener("click", () => { ai.mode = "summary"; renderAiPanel(path); });
+    head.appendChild(toggle);
   }
-  head.appendChild(toggle);
 
   // Refresh: cached results never auto-bust (e.g. after a new commit), so offer
   // a one-click re-run of the current mode.
@@ -1424,12 +1432,17 @@ function renderAiPanel(path) {
     progRow.className = "ai-loading";
     progRow.style.marginTop = "8px";
     progRow.innerHTML = `<span class="ai-progress-track"><span class="ai-progress-indef"></span></span> ${MAX_NOTE}`;
-    const cancel = document.createElement("button");
-    cancel.className = "btn";
-    cancel.style.marginTop = "8px";
-    cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => cancelJob(path));
-    el.append(loading, progRow, cancel);
+    el.append(loading, progRow);
+    // Summary has its own ■ Stop in the header; explain/ask still get a
+    // body-level Cancel since they have no header stop control.
+    if (ai.runningMode !== "summary") {
+      const cancel = document.createElement("button");
+      cancel.className = "btn";
+      cancel.style.marginTop = "8px";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => cancelJob(path));
+      el.appendChild(cancel);
+    }
     return;
   }
 
@@ -1453,7 +1466,7 @@ function renderAiPanel(path) {
   const body = document.createElement("div");
   body.className = "ai-body";
   const cached = ai.mode === "explain" ? ai.results.explain : ai.results.summary;
-  const resultText = cached || (ai.mode === "summary" && ai.status === "idle" ? "Loading summary…" : "");
+  const resultText = cached || (ai.mode === "summary" && ai.status === "idle" ? "Click ▶ Summary above to generate an AI summary of this file." : "");
   renderMarkdown(body, resultText);
   el.appendChild(body);
 

@@ -1512,7 +1512,11 @@ function renderAiPanel(path) {
 
 function focusAsk() {
   const input = document.getElementById("ai-ask-input");
-  if (input) input.focus();
+  if (!input) return;
+  const sel = diffSelection(); // capture NOW — focusing the input below clears it
+  if (sel) input.value = sel.text;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length); // cursor at end, ready to type
 }
 
 function divider() { const hr = document.createElement("hr"); hr.className = "ai-divider"; return hr; }
@@ -2954,9 +2958,10 @@ document.addEventListener("keydown", (e) => {
   }
   if (activeScreen !== "review") return;
   if (isTyping(e)) return;
-  // Selecting diff text blocks navigation/action shortcuts — except "c", which
-  // anchors a review comment to the selected line range (openCommentModal).
-  if (diffSelection() && e.key !== "c") return;
+  // Selecting diff text blocks navigation/action shortcuts — except "c" (anchors
+  // a review comment to the selected line range) and "a" (passes the selection
+  // into the Ask box via focusAsk).
+  if (diffSelection() && e.key !== "c" && e.key !== "a") return;
 
   switch (e.key) {
     case "j": case "n": e.preventDefault(); navTo(1); break;   // next file

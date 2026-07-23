@@ -1,5 +1,5 @@
 [project]
-name = "prview"
+name = "pr-view"
 version = "0.1.0"
 description = "Web-based file-by-file PR review"
 readme = "README.md"
@@ -9,6 +9,10 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gwicho38/prview"
+Repository = "https://github.com/gwicho38/prview"
 
 [project.scripts]
 prview = "prview.launcher:main"

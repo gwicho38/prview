@@ -3,13 +3,22 @@
  * diff2html is vendored under /static/vendor and exposed as window.Diff2HtmlUI. */
 
 // ----------------------------------------------------------------------------
-// Session token: captured once from ?token= on load, sent on every API call.
+// Session token: captured from ?token= on load (or sessionStorage on refresh),
+// sent on every API call.
 // ----------------------------------------------------------------------------
-const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const TOKEN_KEY = "prview.sessionToken";
+const _urlToken = new URLSearchParams(location.search).get("token") || "";
+let _storedToken = "";
+try { _storedToken = sessionStorage.getItem(TOKEN_KEY) || ""; } catch { /* best-effort */ }
+const TOKEN = _urlToken || _storedToken;
 const TOKEN_HEADER = "X-Prview-Token";
-// Strip the token from the visible URL so it doesn't linger in browser history
-// or leak via Referer. It's already captured above and sent as a header.
-if (TOKEN && window.history && history.replaceState) {
+// Persist the token so a same-tab refresh doesn't lose the session once the
+// URL is stripped below, then strip it from the visible URL so it doesn't
+// linger in browser history or leak via Referer.
+if (_urlToken) {
+  try { sessionStorage.setItem(TOKEN_KEY, _urlToken); } catch { /* best-effort */ }
+}
+if (_urlToken && window.history && history.replaceState) {
   const _u = new URL(location.href);
   _u.searchParams.delete("token");
   history.replaceState(null, "", _u.pathname + _u.search + _u.hash);
@@ -2932,7 +2941,9 @@ document.addEventListener("keydown", (e) => {
   }
   if (activeScreen !== "review") return;
   if (isTyping(e)) return;
-  if (diffSelection()) return; // user is selecting diff text — don't navigate/act
+  // Selecting diff text blocks navigation/action shortcuts — except "c", which
+  // anchors a review comment to the selected line range (openCommentModal).
+  if (diffSelection() && e.key !== "c") return;
 
   switch (e.key) {
     case "j": case "n": e.preventDefault(); navTo(1); break;   // next file

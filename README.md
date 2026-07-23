@@ -7,6 +7,8 @@ A portable, local-server web app for reviewing GitHub pull requests file-by-file
 
 See the full [user guide](docs/user-guide.md).
 
+![prview file-by-file review with AI summary](docs/assets/review-screenshot.png)
+
 ## What it does
 
 - Load a PR by `owner/repo#123` or a GitHub URL.
@@ -49,13 +51,23 @@ claude --version                # verify it's on your PATH
 ```sh
 # Python ≥ 3.10 and uv (https://docs.astral.sh/uv/)
 git clone https://github.com/gwicho38/prview && cd prview
-uv sync
-uv run prview                   # or: python -m prview
+make install                    # installs the `prview` CLI globally (uv tool install)
+prview start                    # runs it in the background
+prview open                     # opens it in your browser
+prview stop                     # stops it
 ```
 
-`prview` picks a free `127.0.0.1` port, mints a per-session token, starts the server, and opens your browser automatically.
+`prview` picks a free `127.0.0.1` port, mints a per-session token, and starts the server.
+`start` runs it detached in the background (survives the shell exiting); `open` launches your
+browser at the running instance; `stop` shuts it down. Running `prview` with no subcommand keeps
+the original foreground behavior — auto-opens the browser, `Ctrl-C` to quit.
 
-> There is no `./prview` script — the package directory occupies that name. Use `uv run prview` or `python -m prview`.
+Working from a checkout without a global install? `make dev` (`uv sync`) then `uv run prview`, or
+`make start` / `make open` / `make stop`, which wrap the same subcommands via `uv run`. `make
+update` pulls the latest `main` and reinstalls the CLI.
+
+> There is no `./prview` script — the package directory occupies that name. Use `prview` (once
+> installed), `uv run prview`, or `python -m prview`.
 
 ### 4. Repowise (optional) — for the codebase-intelligence tab
 
@@ -120,10 +132,17 @@ Two more actions in the bar:
 Common tasks are wrapped in the `Makefile` (`make help` to list them):
 
 ```sh
-make install        # uv sync (deps + dev group)
+make dev            # uv sync (deps + dev group)
 make test           # uv run pytest — full suite
-make run            # launch prview
+make run            # launch prview in the foreground
 make docker-build   # build the container image
+
+make install        # install the prview CLI globally (uv tool install)
+make uninstall      # remove the globally installed CLI
+make update         # git pull main + reinstall the CLI
+make start          # start prview in the background
+make stop           # stop the background prview
+make open           # open the running prview in your browser
 ```
 
 The codebase keeps a pure functional core (`prview/core.py`) with all subprocess / filesystem / network I/O pushed to the edges (`gh.py`, `jobs.py`, `state_store.py`, `server.py`). The diff renderer (diff2html) is vendored under `prview/static/vendor/` — the app makes zero external network requests at runtime.

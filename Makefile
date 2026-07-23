@@ -1,19 +1,20 @@
 .DEFAULT_GOAL := help
 IMAGE := prview:dev
 
-.PHONY: help install test run docker-build docker-run clean
+.PHONY: help dev test run docker-build docker-run clean \
+	install uninstall update start stop open
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-install: ## Sync dependencies (incl. dev group) into the uv venv
+dev: ## Sync dependencies (incl. dev group) into the uv venv, for local development
 	uv sync
 
 test: ## Run the full test suite
 	uv run pytest -q
 
-run: ## Launch prview (free localhost port, opens the browser)
+run: ## Launch prview in the foreground (auto-opens the browser)
 	uv run prview
 
 docker-build: ## Build the container image
@@ -24,3 +25,22 @@ docker-run: ## Run the container (binds 127.0.0.1:8000; needs gh/claude for live
 
 clean: ## Remove caches and build artifacts
 	rm -rf .pytest_cache .ruff_cache **/__pycache__ dist build
+
+install: ## Install the prview CLI globally (uv tool install)
+	uv tool install --force .
+
+uninstall: ## Remove the globally installed prview CLI
+	uv tool uninstall pr-view
+
+update: ## Pull the latest main and reinstall the CLI
+	git pull origin main
+	uv tool install --force .
+
+start: ## Start prview in the background (detached; survives this shell exiting)
+	uv run prview start
+
+stop: ## Stop the background prview
+	uv run prview stop
+
+open: ## Open the running prview in your browser
+	uv run prview open

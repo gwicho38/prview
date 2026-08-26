@@ -27,9 +27,28 @@ if (_urlToken && window.history && history.replaceState) {
 // ----------------------------------------------------------------------------
 // In-memory app state (single working copy; rehydrated from server on load).
 // ----------------------------------------------------------------------------
+// Review order. Story order (definitions before call sites) is the default —
+// alphabetical scatters a change across unrelated directories.
+const ORDER_KEY = "prview:review-order";
+const ORDER_MODES = [
+  ["story", "Story"],
+  ["complexity", "Complexity"],
+  ["churn", "Largest"],
+  ["alpha", "A\u2013Z"],
+];
+const DEFAULT_ORDER = "story";
+
+function savedOrder() {
+  let saved = null;
+  try { saved = localStorage.getItem(ORDER_KEY); } catch { saved = null; }
+  return ORDER_MODES.some(([m]) => m === saved) ? saved : DEFAULT_ORDER;
+}
+
 const State = {
   pr: null,            // PRInfoModel
-  files: [],           // [FileListItem] (server-sorted by change size desc)
+  files: [],           // [FileListItem] in State.order (server ships largest-first)
+  orders: {},          // mode -> [filename], from the server; see prview/order.py
+  order: DEFAULT_ORDER,// display order of `files`; persisted in localStorage
   review: null,        // ReviewStateModel {viewed[], flagged{}, comments, submitted}
   idx: 0,              // current file index
   detailCache: {},     // path -> FileDetail
@@ -395,12 +414,15 @@ function enterReview(data) {
   State.standalone = false;
   State.pr = data.pr;
   State.files = data.files;
+  State.orders = data.orders || {};
+  State.order = savedOrder();
   State.review = data.review || data.state; // server key is `state`
   State.detailCache = {};
   State.fullCache = {};
   State.ai = {};
   State.rw = null;
   applyReviewToFiles();
+  applyOrder();
   State.idx = firstUnviewedIndex();
   State.ov = null;
   show(initialTab());
@@ -622,6 +644,27 @@ function renderFileList() {
   count.textContent = `${done}/${total} viewed`;
   head.appendChild(count);
 
+  // Controls share a right-aligned group so a narrow sidebar wraps them onto
+  // their own line instead of squeezing the viewed count.
+  const controls = document.createElement("div");
+  controls.className = "fl-head-controls";
+
+  if (Object.keys(State.orders).length) {
+    const sel = document.createElement("select");
+    sel.className = "fl-order-select";
+    sel.title = "Review order (o cycles)";
+    sel.setAttribute("aria-label", "Review order");
+    ORDER_MODES.forEach(([mode, label]) => {
+      const opt = document.createElement("option");
+      opt.value = mode;
+      opt.textContent = label;
+      opt.selected = mode === State.order;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener("change", () => setOrder(sel.value));
+    controls.appendChild(sel);
+  }
+
   if (State.files.some((f) => isTestFile(f.filename))) {
     const toggle = document.createElement("button");
     toggle.className = "btn btn-ghost fl-tests-toggle";
@@ -629,8 +672,9 @@ function renderFileList() {
     toggle.title = "Show/hide test files (t)";
     toggle.setAttribute("aria-pressed", String(State.hideTests));
     toggle.addEventListener("click", toggleHideTests);
-    head.appendChild(toggle);
+    controls.appendChild(toggle);
   }
+  if (controls.children.length) head.appendChild(controls);
   const track = document.createElement("div");
   track.className = "progress-track";
   track.setAttribute("role", "progressbar");
@@ -721,6 +765,36 @@ function nearestVisible(from) {
     if (from - d >= 0 && !isHidden(State.files[from - d])) return from - d;
   }
   return -1;
+}
+
+// Reorder State.files in place per State.orders. Bails on any mismatch with the
+// server's list rather than dropping a file from the review.
+function applyOrder() {
+  const names = State.orders[State.order];
+  if (!names || names.length !== State.files.length) return;
+  const byName = new Map(State.files.map((f) => [f.filename, f]));
+  const next = names.map((n) => byName.get(n)).filter(Boolean);
+  if (next.length !== State.files.length) return;
+  const open = currentFile() ? currentFile().filename : null;
+  State.files = next;
+  if (open) {
+    const i = State.files.findIndex((f) => f.filename === open);
+    if (i >= 0) State.idx = i;
+  }
+}
+
+function setOrder(mode) {
+  State.order = mode;
+  try { localStorage.setItem(ORDER_KEY, mode); } catch { /* best-effort */ }
+  applyOrder();
+  renderFileList();
+}
+
+function cycleOrder() {
+  const at = ORDER_MODES.findIndex(([m]) => m === State.order);
+  const [mode, label] = ORDER_MODES[(at + 1) % ORDER_MODES.length];
+  setOrder(mode);
+  toast(`Order: ${label}`);
 }
 
 function toggleHideTests() {
@@ -2973,6 +3047,7 @@ document.addEventListener("keydown", (e) => {
     case "c": e.preventDefault(); openCommentModal(); break;
     case "f": e.preventDefault(); openFlagModal(); break;
     case "t": e.preventDefault(); toggleHideTests(); break;
+    case "o": e.preventDefault(); cycleOrder(); break;
     case "s": e.preventDefault(); show("submit"); break;
     case "q": case "Escape": e.preventDefault(); show("landing"); break;
   }

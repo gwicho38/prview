@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import prview.core as core
 import prview.gh as gh
 import prview.jobs as jobs
+import prview.order as order
 import prview.server as server
 import prview.state_store as state_store
 
@@ -66,6 +67,16 @@ def test_post_pr_happy_path(client, monkeypatch):
     assert data["state"]["comments"] == 0
     # PR lifecycle state (OPEN/CLOSED/MERGED) is exposed for the frontend's PR badge.
     assert data["pr"]["state"] == "OPEN"
+
+
+def test_pr_response_carries_every_review_order(client, monkeypatch):
+    data = _load_pr(client, monkeypatch).json()
+    names = {f["filename"] for f in data["files"]}
+    assert set(data["orders"]) == set(order.MODES)
+    for mode, listed in data["orders"].items():
+        assert set(listed) == names, mode
+    # `files` stays largest-first whatever the client later displays.
+    assert [f["filename"] for f in data["files"]] == data["orders"]["churn"]
 
 
 def test_pr_response_carries_head_sha(client, monkeypatch):

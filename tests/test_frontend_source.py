@@ -52,3 +52,23 @@ def test_pr_lifecycle_state_badge_covers_open_merged_closed():
     # Submitting a review only makes sense while the PR is still open.
     assert 'const prIsOpen = (pr.state || "").toUpperCase() === "OPEN";' in APP_JS
     assert "submit.disabled = !prIsOpen;" in APP_JS
+
+
+def test_review_order_defaults_to_story_and_persists():
+    assert 'const ORDER_KEY = "prview:review-order";' in APP_JS
+    assert 'const DEFAULT_ORDER = "story";' in APP_JS
+    assert "localStorage.setItem(ORDER_KEY, mode)" in APP_JS
+    # Declared before State, which reads DEFAULT_ORDER in its initializer.
+    assert APP_JS.index("const DEFAULT_ORDER") < APP_JS.index("const State = {")
+
+
+def test_reorder_keeps_the_open_file_and_never_drops_one():
+    assert "function applyOrder()" in APP_JS
+    assert "if (next.length !== State.files.length) return;" in APP_JS
+    assert 'State.files.findIndex((f) => f.filename === open)' in APP_JS
+    assert "applyOrder();" in APP_JS
+
+
+def test_order_control_and_shortcut_are_wired():
+    assert '"fl-order-select"' in APP_JS
+    assert 'case "o": e.preventDefault(); cycleOrder(); break;' in APP_JS

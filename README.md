@@ -90,10 +90,14 @@ See **[Repowise tab](#repowise-tab-optional)** below for first-run steps.
 
 1. Enter `owner/repo#123` (or a full GitHub PR URL) and press **Load PR**.
 2. Click files in the sidebar (or `j`/`k`) to read each diff.
+   The sidebar dropdown sets the **review order**: **Story** (the default — schema and
+   type definitions first, then core logic, then the call sites that use it, then UI,
+   config, tests, generated files), **Complexity** (most added branching first),
+   **Largest**, or **A–Z**. `o` cycles; the choice sticks across PRs.
 3. Use the AI panel: a summary auto-loads; **Explain** for a deep walk-through; **Ask** to query the file.
 4. **Flag** files with notes, **Comment**, mark **Viewed**, then **Submit** your review.
 
-**Keyboard shortcuts:** `v` viewed · `e` explain · `a` ask · `c` comment · `f` flag · `s` submit · `j`/`k` navigate · `q` back/close.
+**Keyboard shortcuts:** `v` viewed · `e` explain · `a` ask · `c` comment · `f` flag · `o` order · `s` submit · `j`/`k` navigate · `q` back/close.
 
 Reopen `prview` later and pick the PR from the resume list — your viewed/flagged state is restored.
 

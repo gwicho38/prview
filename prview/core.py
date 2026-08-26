@@ -508,3 +508,28 @@ def build_overview_prompt(pr: PRInfo, files: list) -> str:
     )
 
     return header + diffs + "\n" + instructions + "\n" + _OVERVIEW_EXEMPLARS
+
+
+def build_behavior_names_prompt(pr: PRInfo, derived: list) -> str:
+    """Ask for effect-first titles over an already-derived grouping.
+
+    No diffs: naming needs the author's intent, which the PR title, body and
+    commit subjects already carry, and diffs are what make the prompt expensive.
+    """
+    listing = "\n".join(
+        f"{b.id} — {b.title} ({', '.join(b.filenames)})" for b in derived
+    )
+    return (
+        f"A pull request titled \"{pr.title}\" is grouped into behaviors, one per commit.\n\n"
+        f"PR description:\n{pr.body or '(none)'}\n\n"
+        f"Behaviors:\n{listing}\n\n"
+        "Rewrite each title to say what changes for a person or for the running "
+        "system, in at most 60 characters, imperative mood, no commit-message "
+        "prefix. Merge behaviors ONLY when they are adjacent in the list and are "
+        "one unit of work. Mark a behavior [noise] when it is incidental "
+        "(formatting, lint, typo, review fixups).\n\n"
+        "Reply with one line per behavior and nothing else that looks like one:\n"
+        "b1 -> New title\n"
+        "b2+b3 -> Merged title [noise]\n\n"
+        "Every id above must appear exactly once. Do not list files."
+    )

@@ -82,3 +82,74 @@ def test_every_pr_file_appears_exactly_once_across_behaviors():
     )
     seen = [f for b in got for f in b.filenames]
     assert sorted(seen) == ["x.py", "y.py", "z.py"]
+
+
+def _derived():
+    return [
+        behaviors.Behavior("b1", "feat: model", ("a",), ("model.py",)),
+        behaviors.Behavior("b2", "feat: wire", ("b",), ("server.py",)),
+        behaviors.Behavior("b3", "chore: lint", ("c",), ("style.css",)),
+    ]
+
+
+def test_names_reply_renames_in_place():
+    got = behaviors.apply_behavior_names(_derived(), """
+b1 -> Store an order per customer
+b2 -> Expose orders over HTTP
+b3 -> Tidy the stylesheet [noise]
+""")
+    assert [b.title for b in got] == [
+        "Store an order per customer", "Expose orders over HTTP", "Tidy the stylesheet",
+    ]
+    assert [b.noise for b in got] == [False, False, True]
+    assert [b.filenames for b in got] == [("model.py",), ("server.py",), ("style.css",)]
+
+
+def test_names_reply_merges_adjacent_behaviors_and_renumbers():
+    got = behaviors.apply_behavior_names(_derived(), "b1+b2 -> Orders end to end\nb3 -> Lint [noise]")
+    assert [(b.id, b.title) for b in got] == [("b1", "Orders end to end"), ("b2", "Lint")]
+    assert got[0].source_shas == ("a", "b")
+    assert got[0].filenames == ("model.py", "server.py")
+
+
+def test_names_reply_tolerates_surrounding_prose():
+    got = behaviors.apply_behavior_names(_derived(), """
+Sure — here is the grouping:
+
+b1 -> One
+b2 -> Two
+b3 -> Three
+
+Let me know if you want changes.
+""")
+    assert [b.title for b in got] == ["One", "Two", "Three"]
+
+
+def test_names_reply_accepts_the_unicode_arrow():
+    got = behaviors.apply_behavior_names(_derived(), "b1 → One\nb2 → Two\nb3 → Three")
+    assert [b.title for b in got] == ["One", "Two", "Three"]
+
+
+def test_names_reply_is_rejected_when_an_id_is_unknown():
+    assert behaviors.apply_behavior_names(_derived(), "b1 -> One\nb2 -> Two\nb9 -> Ghost") is None
+
+
+def test_names_reply_is_rejected_when_an_id_is_missing():
+    assert behaviors.apply_behavior_names(_derived(), "b1 -> One\nb2 -> Two") is None
+
+
+def test_names_reply_is_rejected_when_an_id_repeats():
+    assert behaviors.apply_behavior_names(
+        _derived(), "b1 -> One\nb1 -> Again\nb2 -> Two\nb3 -> Three") is None
+
+
+def test_names_reply_is_rejected_for_a_non_adjacent_merge():
+    assert behaviors.apply_behavior_names(_derived(), "b1+b3 -> Split\nb2 -> Two") is None
+
+
+def test_names_reply_is_rejected_for_an_empty_title():
+    assert behaviors.apply_behavior_names(_derived(), "b1 -> \nb2 -> Two\nb3 -> Three") is None
+
+
+def test_names_reply_is_rejected_when_it_contains_no_mapping_lines():
+    assert behaviors.apply_behavior_names(_derived(), "I could not determine any behaviors.") is None

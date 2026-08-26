@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import prview.core as core
 from prview.core import (
     FileDiff,
@@ -160,3 +162,17 @@ def test_overview_prompt_clips_body():
 def test_overview_prompt_embeds_exemplars():
     p = core.build_overview_prompt(_ov_pr(), [])
     assert core._OVERVIEW_EXEMPLARS.strip() in p
+
+
+def test_behavior_names_prompt_carries_ids_titles_and_files_but_no_diffs():
+    pr = core.PRInfo(owner="o", repo="r", number=7, title="Add orders", body="why")
+    derived = [
+        SimpleNamespace(id="b1", title="feat: model", filenames=("model.py",)),
+        SimpleNamespace(id="b2", title="feat: wire", filenames=("server.py", "app.js")),
+    ]
+    prompt = core.build_behavior_names_prompt(pr, derived)
+    assert "b1" in prompt and "feat: model" in prompt and "model.py" in prompt
+    assert "server.py, app.js" in prompt
+    assert "Add orders" in prompt
+    assert "@@" not in prompt and "diff --git" not in prompt
+    assert "->" in prompt

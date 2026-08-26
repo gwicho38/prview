@@ -19,6 +19,7 @@ from prview.core import (
     FileDiff,
     PRInfo,
     build_ask_prompt,
+    build_behavior_names_prompt,
     build_explain_prompt,
     build_explain_selection_prompt,
     build_overview_prompt,
@@ -157,7 +158,8 @@ def cancel_job(job_id: str) -> bool:
     return True
 
 
-_KIND_TIMEOUTS = {"summary": 60, "explain": 300, "ask": 300, "explain-selection": 300, "overview": 300}
+_KIND_TIMEOUTS = {"summary": 60, "explain": 300, "ask": 300, "explain-selection": 300,
+                  "overview": 300, "behavior-names": 60}
 
 
 def start_summary(pr: PRInfo, fd: FileDiff) -> str:
@@ -187,3 +189,12 @@ def start_overview(pr: PRInfo, files: list[FileDiff], sha: str) -> str:
         save_overview(pr.owner, pr.repo, pr.number, sha, result)
     return start_job("overview", build_overview_prompt(pr, files),
                      timeout=_KIND_TIMEOUTS["overview"], on_done=persist)
+
+
+def start_behavior_names(pr: PRInfo, derived: list, on_done=None) -> str:
+    """Rename/merge an existing behavior grouping. Naming only — 60s is plenty.
+
+    `on_done` receives the raw reply, mirroring start_overview's persist hook.
+    """
+    return start_job("behavior-names", build_behavior_names_prompt(pr, derived),
+                     timeout=_KIND_TIMEOUTS["behavior-names"], on_done=on_done)

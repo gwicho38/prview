@@ -341,6 +341,18 @@ a { color: var(--accent); }
 .fl-progress { padding: 0 14px 10px; }
 .fl-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
 .fl-progress .fl-count { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
+.fl-order-select {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  color: var(--fg-muted);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.fl-order-select:hover, .fl-order-select:focus-visible { color: var(--fg); }
 .fl-tests-toggle { font-family: var(--mono); font-size: 11px; padding: 2px 7px; }
 .fl-tests-toggle[aria-pressed="true"] { color: var(--fg); border-color: var(--border); }
 .fl-empty { padding: 14px; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }

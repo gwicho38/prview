@@ -199,6 +199,8 @@ class PRResponse(BaseModel):
     pr: PRInfoModel
     files: list[FileListItem]
     state: ReviewStateModel
+    # filename lists keyed by review-order mode; `files` stays largest-first.
+    orders: dict[str, list[str]] = {}
 
 
 class JobIdResponse(BaseModel):

@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 import prview.core as core
 import prview.gh as gh
 import prview.jobs as jobs
+import prview.order as order
 import prview.repowise as repowise
 import prview.state_store as state_store
 from prview.api_models import (
@@ -117,6 +118,9 @@ def _err(status: int, error: str, hint: str | None = None) -> HTTPException:
 
 
 def _sorted_files(files: list[core.FileDiff]) -> list[core.FileDiff]:
+    """Largest-first. core.build_overview_prompt depends on this order to pick
+    which whole diffs reach the AI summary, so it is the cache order; display
+    order is the client's choice from the `orders` map."""
     return sorted(files, key=lambda f: f.additions + f.deletions, reverse=True)
 
 
@@ -131,6 +135,7 @@ def _load_pr(owner: str, repo: str, number: int) -> PRResponse:
         pr=PRInfoModel.of(pr),
         files=[FileListItem.of(f) for f in files],
         state=ReviewStateModel.of(state),
+        orders=order.orders_map(files),
     )
 
 

@@ -18,6 +18,7 @@ holding the per-PR lock for the whole read-modify-write before returning.
 Errors: GhError / parse errors / cache misses map to structured {error, hint?}
 JSON via HTTPException(detail=...) — never a leaked stack trace.
 """
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -25,6 +26,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import prview.behaviors as behaviors
 import prview.core as core
 import prview.gh as gh
 import prview.jobs as jobs
@@ -34,6 +36,8 @@ import prview.state_store as state_store
 from prview.api_models import (
     ArchiveRequest,
     AskRequest,
+    BehaviorModel,
+    BehaviorsResponse,
     CommentRequest,
     ExplainSelectionRequest,
     FileDetail,
@@ -169,6 +173,48 @@ def post_pr(req: PRRefRequest) -> PRResponse:
 @app.get("/pr/{owner}/{repo}/{n}", response_model=PRResponse)
 def get_pr(owner: str, repo: str, n: int) -> PRResponse:
     return _load_pr(owner, repo, n)
+
+
+# Grouping costs N+1 gh calls, so it's computed on first use and kept until the head SHA moves.
+_BEHAVIOR_CACHE: dict[tuple[str, str, int, str], list] = {}
+
+
+def _behaviors_for(owner: str, repo: str, number: int) -> tuple[list, str, bool]:
+    entry = _cached(owner, repo, number)
+    pr, files = entry["pr"], entry["files"]
+    key = (owner, repo, number, pr.head_sha)
+    try:
+        commits = gh.fetch_pr_commits(owner, repo, number)
+    except gh.GhError as e:
+        raise _err(409, str(e), getattr(e, "hint", None))
+    groupable = behaviors.is_groupable(commits)
+    if key not in _BEHAVIOR_CACHE:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            listed = pool.map(
+                lambda sha: (sha, gh.fetch_commit_files(owner, repo, sha)),
+                [c["sha"] for c in commits if not c["is_merge"]],
+            )
+            files_by_sha = dict(listed)
+        _BEHAVIOR_CACHE[key] = behaviors.behaviors_from_commits(
+            commits, files_by_sha, {f.filename for f in files})
+    return _BEHAVIOR_CACHE[key], pr.head_sha, groupable
+
+
+@app.get("/pr/{owner}/{repo}/{n}/behaviors", response_model=BehaviorsResponse)
+def get_behaviors(owner: str, repo: str, n: int) -> BehaviorsResponse:
+    derived, head_sha, groupable = _behaviors_for(owner, repo, n)
+    return BehaviorsResponse(
+        behaviors=[BehaviorModel.of(b) for b in derived],
+        head_sha=head_sha,
+        groupable=groupable,
+    )
+
+
+@app.post("/ai/behavior-names", response_model=JobIdResponse)
+def post_ai_behavior_names(req: PRTarget) -> JobIdResponse:
+    derived, _, _ = _behaviors_for(req.owner, req.repo, req.number)
+    entry = _cached(req.owner, req.repo, req.number)
+    return JobIdResponse(job_id=jobs.start_behavior_names(entry["pr"], derived))
 
 
 @app.get("/pr/{owner}/{repo}/{n}/file", response_model=FileDetail)

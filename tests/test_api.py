@@ -20,6 +20,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_CACHE_DIR", tmp_path / "state")
     state_store.reset_locks()
     server.cache._store.clear()
+    server._BEHAVIOR_CACHE.clear()
     server.set_session_token(TOKEN)
     c = TestClient(server.app)
     c.headers.update({"X-Prview-Token": TOKEN, "Host": "127.0.0.1"})
@@ -426,3 +427,79 @@ def test_review_submit_url_null_when_lookup_fails(client, monkeypatch):
     resp = client.post("/review/submit", json={"owner": "octo", "repo": "hello", "number": 7, "event": "comment"})
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "error": None, "url": None}
+
+
+def _fake_commits():
+    return [
+        {"sha": "s1", "subject": "feat: big", "is_merge": False},
+        {"sha": "s2", "subject": "fix: small", "is_merge": False},
+    ]
+
+
+def _wire_commits(monkeypatch, calls=None):
+    monkeypatch.setattr(gh, "fetch_pr_commits", lambda o, r, n: _fake_commits())
+
+    def files(o, r, sha):
+        if calls is not None:
+            calls.append(sha)
+        return {"s1": ["big.py"], "s2": ["small.py"]}[sha]
+
+    monkeypatch.setattr(gh, "fetch_commit_files", files)
+
+
+def test_behaviors_endpoint_groups_the_prs_files(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    resp = client.get("/pr/octo/hello/7/behaviors")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["groupable"] is True
+    assert data["head_sha"] == "sha-a"
+    assert [(b["id"], b["title"], b["filenames"]) for b in data["behaviors"]] == [
+        ("b1", "feat: big", ["big.py"]),
+        ("b2", "fix: small", ["small.py"]),
+    ]
+
+
+def test_behaviors_are_cached_per_head_sha(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    calls = []
+    _wire_commits(monkeypatch, calls)
+    client.get("/pr/octo/hello/7/behaviors")
+    client.get("/pr/octo/hello/7/behaviors")
+    assert sorted(calls) == ["s1", "s2"], "second request must not re-fetch commit files"
+
+
+def test_behaviors_endpoint_reports_a_single_commit_pr_as_ungroupable(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "fetch_pr_commits",
+                        lambda o, r, n: [{"sha": "s1", "subject": "feat: only", "is_merge": False}])
+    monkeypatch.setattr(gh, "fetch_commit_files", lambda o, r, sha: ["big.py"])
+    data = client.get("/pr/octo/hello/7/behaviors").json()
+    assert data["groupable"] is False
+
+
+def test_behaviors_endpoint_409s_when_commits_are_unreachable(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+
+    def boom(o, r, n):
+        raise gh.GhError("Failed to fetch PR commits: gone", hint="run `gh auth login`")
+
+    monkeypatch.setattr(gh, "fetch_pr_commits", boom)
+    resp = client.get("/pr/octo/hello/7/behaviors")
+    assert resp.status_code == 409
+    assert resp.json()["hint"]
+
+
+def test_behaviors_endpoint_409s_without_a_loaded_pr(client):
+    assert client.get("/pr/octo/hello/7/behaviors").status_code == 409
+
+
+def test_ai_behavior_names_starts_a_job(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    monkeypatch.setattr(jobs, "start_behavior_names", lambda pr, derived, on_done=None: "job-xyz")
+    resp = client.post("/ai/behavior-names", json={"owner": "octo", "repo": "hello", "number": 7})
+    assert resp.status_code == 200
+    assert resp.json()["job_id"] == "job-xyz"

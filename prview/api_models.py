@@ -203,6 +203,25 @@ class PRResponse(BaseModel):
     orders: dict[str, list[str]] = {}
 
 
+class BehaviorModel(BaseModel):
+    id: str
+    title: str
+    filenames: list[str]
+    also_in: dict[str, int] = {}
+    noise: bool = False
+
+    @classmethod
+    def of(cls, b) -> "BehaviorModel":
+        return cls(id=b.id, title=b.title, filenames=list(b.filenames),
+                   also_in=dict(b.also_in), noise=b.noise)
+
+
+class BehaviorsResponse(BaseModel):
+    behaviors: list[BehaviorModel]
+    head_sha: str
+    groupable: bool
+
+
 class JobIdResponse(BaseModel):
     job_id: str
 

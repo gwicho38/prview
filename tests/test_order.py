@@ -95,3 +95,10 @@ def test_unknown_mode_falls_back_to_churn():
 
 def test_default_mode_is_story():
     assert order.DEFAULT_MODE == "story"
+
+
+def test_a_monorepo_backend_package_is_not_an_adapter():
+    # `packages/api/**` is a backend, so its files keep their own tiers.
+    assert order.story_tier("packages/api/ultron_api/db/models/channel.py") == 1
+    assert order.story_tier("packages/api/ultron_api/services/assigner.py") == 2
+    assert order.story_tier("packages/api/ultron_api/main.py") == 3

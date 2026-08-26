@@ -644,6 +644,11 @@ function renderFileList() {
   count.textContent = `${done}/${total} viewed`;
   head.appendChild(count);
 
+  // Controls share a right-aligned group so a narrow sidebar wraps them onto
+  // their own line instead of squeezing the viewed count.
+  const controls = document.createElement("div");
+  controls.className = "fl-head-controls";
+
   if (Object.keys(State.orders).length) {
     const sel = document.createElement("select");
     sel.className = "fl-order-select";
@@ -657,7 +662,7 @@ function renderFileList() {
       sel.appendChild(opt);
     });
     sel.addEventListener("change", () => setOrder(sel.value));
-    head.appendChild(sel);
+    controls.appendChild(sel);
   }
 
   if (State.files.some((f) => isTestFile(f.filename))) {
@@ -667,8 +672,9 @@ function renderFileList() {
     toggle.title = "Show/hide test files (t)";
     toggle.setAttribute("aria-pressed", String(State.hideTests));
     toggle.addEventListener("click", toggleHideTests);
-    head.appendChild(toggle);
+    controls.appendChild(toggle);
   }
+  if (controls.children.length) head.appendChild(controls);
   const track = document.createElement("div");
   track.className = "progress-track";
   track.setAttribute("role", "progressbar");

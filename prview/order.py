@@ -33,7 +33,9 @@ _TIER_RULES = (
         r"|\.(jsx|tsx|vue|svelte|css|scss|sass|less|html)$"),
     (1, r"(^|/)(models?|types?|schemas?|entities|dto|interfaces?)([._/]|$)"
         r"|[._](models?|types?|schemas?|dto)\.[^/]+$"),
-    (3, r"(^|/)(server|routes?|router|handlers?|controllers?|endpoints?|api"
+    # No bare `api` here: a monorepo's `packages/api/**` is a whole backend, not
+    # an adapter layer, and matching it buries that backend's models and logic.
+    (3, r"(^|/)(server|routes?|router|handlers?|controllers?|endpoints?"
         r"|cli|main|app|middleware|adapters?|clients?|gh)([._/]|$)"),
     (2, r"(^|/)(core|domain|lib|services?|use_?cases?|logic|utils?|helpers?)([._/]|$)"),
 )

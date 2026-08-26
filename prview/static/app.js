@@ -44,6 +44,13 @@ function savedOrder() {
   return ORDER_MODES.some(([m]) => m === saved) ? saved : DEFAULT_ORDER;
 }
 
+// Behavior grouping is derived from the PR's commits lazily — it costs one gh call per commit.
+const GROUP_KEY = "prview:group-behaviors";
+
+function savedGrouped() {
+  try { return localStorage.getItem(GROUP_KEY) === "1"; } catch { return false; }
+}
+
 const State = {
   pr: null,            // PRInfoModel
   files: [],           // [FileListItem] in State.order (server ships largest-first)
@@ -56,6 +63,9 @@ const State = {
   rw: null,            // repowise prepare state for the current PR (see Repowise)
   standalone: false,   // true when viewing a local repo without a PR
   hideTests: false,    // UI-only: drop test files from the file list + n/p nav
+  grouped: false,       // sidebar groups files under behaviors
+  behaviors: null,      // [BehaviorModel] once loaded; null = not fetched
+  collapsed: {},        // behavior id -> true; per-PR, not a preference
 };
 
 function prKey() {
@@ -416,6 +426,9 @@ function enterReview(data) {
   State.files = data.files;
   State.orders = data.orders || {};
   State.order = savedOrder();
+  State.grouped = savedGrouped();
+  State.behaviors = null;
+  State.collapsed = {};
   State.review = data.review || data.state; // server key is `state`
   State.detailCache = {};
   State.fullCache = {};
@@ -530,6 +543,14 @@ function isTestFile(filename) {
 // A file is hidden when the show/hide-tests toggle is off and it's a test file.
 function isHidden(f) { return State.hideTests && isTestFile(f.filename); }
 
+// A file in a collapsed behavior must drop out of the progress count too, like a hidden test file.
+function isCollapsedByBehavior(f) {
+  if (!State.grouped || !State.behaviors) return false;
+  const b = behaviorOf(f.filename);
+  if (!b) return false;
+  return State.collapsed[b.id] ?? b.noise;
+}
+
 function renderSummary() {
   if (!State.pr) return;
   const pr = State.pr;
@@ -630,7 +651,7 @@ function renderFileList() {
   el.innerHTML = "";
 
   // Progress reflects only visible files, so hiding tests doesn't strand the bar below 100%.
-  const visible = State.files.filter((f) => !isHidden(f));
+  const visible = State.files.filter((f) => !isHidden(f) && !isCollapsedByBehavior(f));
   const total = visible.length;
   const done = visible.filter((f) => f.viewed).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
@@ -665,6 +686,24 @@ function renderFileList() {
     controls.appendChild(sel);
   }
 
+  if (!State.standalone) {
+    const grp = document.createElement("button");
+    grp.className = "btn btn-ghost fl-group-toggle";
+    grp.textContent = State.grouped ? "Grouped" : "Flat";
+    grp.title = "Group files by behavior (G)";
+    grp.setAttribute("aria-pressed", String(State.grouped));
+    grp.addEventListener("click", toggleGrouped);
+    controls.appendChild(grp);
+  }
+  if (State.grouped && State.behaviors && State.behaviors.length) {
+    const name = document.createElement("button");
+    name.className = "btn btn-ghost fl-behavior-name";
+    name.textContent = "▶ Name";
+    name.title = "Rewrite behavior titles with AI";
+    name.addEventListener("click", startBehaviorNaming);
+    controls.appendChild(name);
+  }
+
   if (State.files.some((f) => isTestFile(f.filename))) {
     const toggle = document.createElement("button");
     toggle.className = "btn btn-ghost fl-tests-toggle";
@@ -689,47 +728,14 @@ function renderFileList() {
 
   const rows = document.createElement("div");
   rows.className = "fl-rows";
-  State.files.forEach((f, i) => {
-    if (isHidden(f)) return;
-    const row = document.createElement("button");
-    row.className = "fl-row" + (i === State.idx ? " current" : "");
-    row.dataset.idx = i;
-
-    const marker = document.createElement("span");
-    marker.className = "fl-marker";
-    marker.textContent = i === State.idx ? "▸" : "";
-    marker.setAttribute("aria-hidden", "true");
-
-    // Lead with the basename (always fully visible); the directory is dimmed and
-    // truncates first, so files with a shared prefix stay distinguishable.
-    const name = document.createElement("span");
-    name.className = "fl-name";
-    name.title = f.filename;
-    const slash = f.filename.lastIndexOf("/");
-    const base = document.createElement("span");
-    base.className = "fl-base";
-    base.textContent = slash >= 0 ? f.filename.slice(slash + 1) : f.filename;
-    name.appendChild(base);
-    if (slash >= 0) {
-      const dir = document.createElement("span");
-      dir.className = "fl-dir";
-      dir.textContent = f.filename.slice(0, slash);
-      name.appendChild(dir);
-    }
-
-    const counts = document.createElement("span");
-    counts.className = "fl-counts";
-    counts.innerHTML = `<span class="ps-adds">+${f.additions}</span> <span class="ps-dels">−${f.deletions}</span>`;
-
-    const badges = document.createElement("span");
-    badges.className = "fl-badges";
-    if (f.viewed) badges.insertAdjacentHTML("beforeend", '<span class="badge badge-viewed" title="viewed">✓</span>');
-    if (f.flagged) badges.insertAdjacentHTML("beforeend", '<span class="badge badge-flagged" title="flagged">⚑</span>');
-
-    row.append(marker, name, counts, badges);
-    row.addEventListener("click", () => selectFile(i));
-    rows.appendChild(row);
-  });
+  if (State.grouped && State.behaviors && State.behaviors.length) {
+    renderGroupedRows(rows);
+  } else {
+    State.files.forEach((f, i) => {
+      if (isHidden(f)) return;
+      rows.appendChild(buildRow(f, i));
+    });
+  }
 
   if (!rows.childElementCount) {
     const note = document.createElement("div");
@@ -746,6 +752,109 @@ function renderFileList() {
     '<span class="fl-marker">▸ current</span>';
 
   el.append(prog, rows, legend);
+}
+
+function buildRow(f, i) {
+  const row = document.createElement("button");
+  row.className = "fl-row" + (i === State.idx ? " current" : "");
+  row.dataset.idx = i;
+
+  const marker = document.createElement("span");
+  marker.className = "fl-marker";
+  marker.textContent = i === State.idx ? "▸" : "";
+  marker.setAttribute("aria-hidden", "true");
+
+  // Lead with the basename (always fully visible); the directory is dimmed and
+  // truncates first, so files with a shared prefix stay distinguishable.
+  const name = document.createElement("span");
+  name.className = "fl-name";
+  name.title = f.filename;
+  const slash = f.filename.lastIndexOf("/");
+  const base = document.createElement("span");
+  base.className = "fl-base";
+  base.textContent = slash >= 0 ? f.filename.slice(slash + 1) : f.filename;
+  name.appendChild(base);
+  if (slash >= 0) {
+    const dir = document.createElement("span");
+    dir.className = "fl-dir";
+    dir.textContent = f.filename.slice(0, slash);
+    name.appendChild(dir);
+  }
+
+  const counts = document.createElement("span");
+  counts.className = "fl-counts";
+  counts.innerHTML = `<span class="ps-adds">+${f.additions}</span> <span class="ps-dels">−${f.deletions}</span>`;
+
+  const badges = document.createElement("span");
+  badges.className = "fl-badges";
+  if (f.viewed) badges.insertAdjacentHTML("beforeend", '<span class="badge badge-viewed" title="viewed">✓</span>');
+  if (f.flagged) badges.insertAdjacentHTML("beforeend", '<span class="badge badge-flagged" title="flagged">⚑</span>');
+
+  row.append(marker, name, counts, badges);
+
+  const also = State.grouped && State.behaviors
+    ? (behaviorOf(f.filename) || {}).also_in : null;
+  if (also && also[f.filename]) {
+    const badge = document.createElement("span");
+    badge.className = "fl-also-in";
+    badge.textContent = `also in ${also[f.filename]}`;
+    badge.title = `${also[f.filename]} later behavior(s) also touch this file`;
+    row.appendChild(badge);
+  }
+
+  row.addEventListener("click", () => selectFile(i));
+  return row;
+}
+
+function renderGroupedRows(rows) {
+  const byName = new Map(State.files.map((f, i) => [f.filename, i]));
+  (State.behaviors || []).forEach((b, n) => {
+    // Ascending index keeps the reviewer's chosen order; commit order would override it.
+    const mine = b.filenames
+      .map((name) => byName.get(name))
+      .filter((i) => i !== undefined)
+      .sort((x, y) => x - y);
+    const visible = mine.filter((i) => !isHidden(State.files[i]));
+    if (!visible.length) return;
+    const collapsed = State.collapsed[b.id] ?? b.noise;
+
+    const head = document.createElement("div");
+    head.className = "fl-behavior" + (b.noise ? " fl-behavior-noise" : "");
+    const caret = document.createElement("button");
+    caret.className = "btn btn-ghost fl-behavior-caret";
+    caret.textContent = `${collapsed ? "▸" : "▾"} ${n + 1}. ${b.title}`;
+    caret.setAttribute("aria-expanded", String(!collapsed));
+    caret.addEventListener("click", () => {
+      State.collapsed[b.id] = !collapsed;
+      renderFileList();
+    });
+    const meta = document.createElement("span");
+    meta.className = "fl-behavior-meta";
+    const done = visible.filter((i) => State.files[i].viewed).length;
+    meta.textContent = `${visible.length} files · ${done}/${visible.length}`;
+    const cmt = document.createElement("button");
+    cmt.className = "btn btn-ghost fl-behavior-comment";
+    cmt.textContent = "💬";
+    cmt.title = `Comment on: ${b.title}`;
+    cmt.addEventListener("click", () => openBehaviorCommentModal(b));
+    head.append(caret, meta, cmt);
+    rows.appendChild(head);
+
+    if (collapsed) return;
+    visible.forEach((i) => rows.appendChild(buildRow(State.files[i], i)));
+  });
+
+  const grouped = new Set((State.behaviors || []).flatMap((b) => b.filenames));
+  const orphans = State.files
+    .map((f, i) => [f, i])
+    .filter(([f]) => !grouped.has(f.filename) && !isHidden(f));
+  if (orphans.length) {
+    const head = document.createElement("div");
+    head.className = "fl-behavior";
+    head.textContent = `Ungrouped · ${orphans.length} files`;
+    rows.appendChild(head);
+    orphans.forEach(([f, i]) => rows.appendChild(buildRow(f, i)));
+  }
 }
 
 function currentFile() { return State.files[State.idx]; }
@@ -788,6 +897,28 @@ function setOrder(mode) {
   try { localStorage.setItem(ORDER_KEY, mode); } catch { /* best-effort */ }
   applyOrder();
   renderFileList();
+}
+
+async function loadBehaviors() {
+  try {
+    const res = await api("GET", `/pr/${State.pr.owner}/${State.pr.repo}/${State.pr.number}/behaviors`);
+    State.behaviors = res.groupable ? res.behaviors : [];
+    if (!res.groupable) toast("Single commit — nothing to group", "error");
+  } catch (e) {
+    State.behaviors = [];
+    toast(e.message || "could not group by behavior", "error");
+  }
+}
+
+async function toggleGrouped() {
+  State.grouped = !State.grouped;
+  try { localStorage.setItem(GROUP_KEY, State.grouped ? "1" : "0"); } catch { /* best-effort */ }
+  if (State.grouped && State.behaviors === null) await loadBehaviors();
+  renderFileList();
+}
+
+function behaviorOf(filename) {
+  return (State.behaviors || []).find((b) => b.filenames.includes(filename)) || null;
 }
 
 function cycleOrder() {
@@ -1822,6 +1953,70 @@ function openCommentModal() {
       modal.appendChild(foot);
     },
   });
+}
+
+// ---- component:behavior-comment-modal --------------------------------------
+function openBehaviorCommentModal(b) {
+  openModal({
+    title: `Comment on behavior  ${b.title}`,
+    render: (modal, body) => {
+      body.className = "modal-body";
+      const lbl = document.createElement("label");
+      lbl.textContent = `Comment (${b.filenames.length} files: ${b.filenames.join(", ")})`;
+      const ta = document.createElement("textarea");
+      ta.className = "textarea";
+      ta.placeholder = "What about this behavior needs discussing?";
+      body.append(lbl, ta);
+
+      const foot = document.createElement("div");
+      foot.className = "modal-foot";
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "Cancel";
+      cancel.addEventListener("click", closeModal);
+      const post = document.createElement("button");
+      post.className = "btn btn-primary"; post.textContent = "Post comment";
+      post.addEventListener("click", async () => {
+        const text = ta.value.trim();
+        if (!text) { ta.focus(); return; }
+        post.disabled = true; cancel.disabled = true;
+        post.innerHTML = '<span class="spinner spinner-sm"></span> Posting…';
+        try {
+          const res = await api("POST", "/behaviors/comment",
+                                { ...prKey(), behavior_id: b.id, text });
+          if (!res || !res.ok) throw new Error((res && res.error) || "comment failed");
+          State.review.comments = (State.review.comments || 0) + 1;
+          closeModal();
+          renderFileList();
+          toast(res.anchored ? `Comment posted on ${res.path}:${res.line}`
+                             : "Comment posted (no anchorable hunk — posted at PR level)");
+        } catch (e) {
+          post.disabled = false; cancel.disabled = false;
+          post.textContent = "Post comment";
+          toast(e.message || "comment failed", "error");
+        }
+      });
+      foot.append(cancel, post);
+      modal.appendChild(foot);
+      ta.focus();
+    },
+  });
+}
+
+async function startBehaviorNaming() {
+  try {
+    const { job_id } = await api("POST", "/ai/behavior-names", prKey());
+    toast("Naming behaviors…");
+    const poll = setInterval(async () => {
+      const job = await api("GET", `/job/${job_id}`);
+      if (job.status === "running") return;
+      clearInterval(poll);
+      if (job.status !== "done" || !job.result) { toast("behavior naming failed", "error"); return; }
+      await loadBehaviors();   // server-side apply is the source of truth
+      renderFileList();
+    }, 1500);
+  } catch (e) {
+    toast(e.message || "behavior naming failed", "error");
+  }
 }
 
 // ---- component:flag-modal --------------------------------------------------
@@ -3048,6 +3243,7 @@ document.addEventListener("keydown", (e) => {
     case "f": e.preventDefault(); openFlagModal(); break;
     case "t": e.preventDefault(); toggleHideTests(); break;
     case "o": e.preventDefault(); cycleOrder(); break;
+    case "G": e.preventDefault(); toggleGrouped(); break;
     case "s": e.preventDefault(); show("submit"); break;
     case "q": case "Escape": e.preventDefault(); show("landing"); break;
   }

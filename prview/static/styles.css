@@ -353,6 +353,23 @@ a { color: var(--accent); }
   cursor: pointer;
 }
 .fl-order-select:hover, .fl-order-select:focus-visible { color: var(--fg); }
+.fl-group-toggle, .fl-behavior-name { font-family: var(--mono); font-size: 11px; padding: 2px 7px; }
+.fl-group-toggle[aria-pressed="true"] { color: var(--fg); border-color: var(--border); }
+.fl-behavior {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
+}
+.fl-behavior-caret { flex: 1 1 auto; text-align: left; font-family: var(--mono); font-size: 11px; }
+.fl-behavior-meta { flex: 0 0 auto; color: var(--fg-dim); }
+.fl-behavior-noise { opacity: 0.65; }
+.fl-behavior-comment { padding: 0 4px; }
+.fl-also-in { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); }
 .fl-tests-toggle { font-family: var(--mono); font-size: 11px; padding: 2px 7px; }
 .fl-tests-toggle[aria-pressed="true"] { color: var(--fg); border-color: var(--border); }
 .fl-empty { padding: 14px; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }

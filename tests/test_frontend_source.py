@@ -72,3 +72,35 @@ def test_reorder_keeps_the_open_file_and_never_drops_one():
 def test_order_control_and_shortcut_are_wired():
     assert '"fl-order-select"' in APP_JS
     assert 'case "o": e.preventDefault(); cycleOrder(); break;' in APP_JS
+
+
+def test_behavior_grouping_persists_and_is_keyed_separately():
+    assert 'const GROUP_KEY = "prview:group-behaviors";' in APP_JS
+    assert "localStorage.setItem(GROUP_KEY" in APP_JS
+
+
+def test_behavior_grouping_is_toggled_by_shift_g():
+    assert 'case "G": e.preventDefault(); toggleGrouped(); break;' in APP_JS
+
+
+def test_behavior_rows_keep_their_flat_file_index():
+    # Headers are inserted BETWEEN rows; rows keep data-idx so j/k still work.
+    assert "function renderGroupedRows(" in APP_JS
+    assert 'row.dataset.idx' in APP_JS
+
+
+def test_a_file_touched_by_later_behaviors_is_badged():
+    assert '"fl-also-in"' in APP_JS
+    assert "also in ${" in APP_JS
+
+
+def test_behavior_comment_posts_to_the_behavior_endpoint():
+    assert 'api("POST", "/behaviors/comment"' in APP_JS
+    assert "On behavior" in APP_JS or "openBehaviorCommentModal" in APP_JS
+
+
+def test_behavior_names_is_by_election_not_automatic():
+    assert 'api("POST", "/ai/behavior-names"' in APP_JS
+    # No call site may fire naming from the grouping load path.
+    load = APP_JS[APP_JS.index("async function loadBehaviors("):]
+    assert "/ai/behavior-names" not in load[:load.index("\n}\n")]

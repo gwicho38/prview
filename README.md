@@ -94,10 +94,14 @@ See **[Repowise tab](#repowise-tab-optional)** below for first-run steps.
    type definitions first, then core logic, then the call sites that use it, then UI,
    config, tests, generated files), **Complexity** (most added branching first),
    **Largest**, or **A–Z**. `o` cycles; the choice sticks across PRs.
-3. Use the AI panel: a summary auto-loads; **Explain** for a deep walk-through; **Ask** to query the file.
-4. **Flag** files with notes, **Comment**, mark **Viewed**, then **Submit** your review.
+3. Press `G` (or the **Flat**/**Grouped** button) to group files under **behaviors** —
+   one per commit in the PR, titled from the commit subject. `▶ Name` rewrites the titles
+   with AI; 💬 on a behavior header posts a comment addressed to that behavior, anchored to
+   its highest-tier file. Squashed (single-commit) PRs have nothing to group.
+4. Use the AI panel: a summary auto-loads; **Explain** for a deep walk-through; **Ask** to query the file.
+5. **Flag** files with notes, **Comment**, mark **Viewed**, then **Submit** your review.
 
-**Keyboard shortcuts:** `v` viewed · `e` explain · `a` ask · `c` comment · `f` flag · `o` order · `s` submit · `j`/`k` navigate · `q` back/close.
+**Keyboard shortcuts:** `v` viewed · `e` explain · `a` ask · `c` comment · `f` flag · `o` order · `G` group · `s` submit · `j`/`k` navigate · `q` back/close.
 
 Reopen `prview` later and pick the PR from the resume list — your viewed/flagged state is restored.
 

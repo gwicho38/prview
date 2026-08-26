@@ -518,6 +518,28 @@ def test_ai_behavior_names_starts_a_job(client, monkeypatch):
     assert resp.json()["job_id"] == "job-xyz"
 
 
+def test_behavior_naming_applies_a_valid_reply_and_ignores_a_bad_one(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    captured = {}
+
+    def _start(pr, derived, on_done=None):
+        captured["cb"] = on_done
+        return "j1"
+
+    monkeypatch.setattr(jobs, "start_behavior_names", _start)
+    client.post("/ai/behavior-names", json={"owner": "octo", "repo": "hello", "number": 7})
+
+    captured["cb"]("b1 -> Handle the big thing\nb2 -> Handle the small thing")
+    titles = [b["title"] for b in client.get("/pr/octo/hello/7/behaviors").json()["behaviors"]]
+    assert titles == ["Handle the big thing", "Handle the small thing"]
+
+    captured["cb"]("b9 -> Ghost")
+    titles = [b["title"] for b in client.get("/pr/octo/hello/7/behaviors").json()["behaviors"]]
+    assert titles == ["Handle the big thing", "Handle the small thing"], "bad reply must be ignored"
+
+
 def test_behavior_comment_anchors_to_the_highest_tier_files_first_hunk(client, monkeypatch):
     _load_pr(client, monkeypatch)
     _wire_commits(monkeypatch)

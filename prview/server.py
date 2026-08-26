@@ -217,9 +217,17 @@ def get_behaviors(owner: str, repo: str, n: int) -> BehaviorsResponse:
 
 @app.post("/ai/behavior-names", response_model=JobIdResponse)
 def post_ai_behavior_names(req: PRTarget) -> JobIdResponse:
-    derived, _, _ = _behaviors_for(req.owner, req.repo, req.number)
+    derived, head_sha, _ = _behaviors_for(req.owner, req.repo, req.number)
     entry = _cached(req.owner, req.repo, req.number)
-    return JobIdResponse(job_id=jobs.start_behavior_names(entry["pr"], derived))
+    key = (req.owner, req.repo, req.number, head_sha)
+
+    def apply(result: str):
+        named = behaviors.apply_behavior_names(derived, result)
+        if named:
+            _BEHAVIOR_CACHE[key] = named
+
+    return JobIdResponse(
+        job_id=jobs.start_behavior_names(entry["pr"], derived, on_done=apply))
 
 
 @app.get("/pr/{owner}/{repo}/{n}/file", response_model=FileDetail)

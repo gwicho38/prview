@@ -537,8 +537,11 @@ def test_behavior_comment_anchors_to_the_highest_tier_files_first_hunk(client, m
     })
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"ok": True, "anchored": True, "path": "big.py", "line": body["line"]}
+    assert body == {"ok": True, "anchored": True, "path": "big.py", "line": 5}
     assert seen["path"] == "big.py"
+    assert seen["line"] == 5
+    assert seen["side"] == "RIGHT"
+    assert seen["start_line"] == 1
     assert seen["text"].startswith("**On behavior: feat: big**")
     assert "(big.py)" in seen["text"]
     assert "why the churn tiebreak?" in seen["text"]

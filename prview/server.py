@@ -373,12 +373,7 @@ def post_comment(req: CommentRequest) -> OkResponse:
 
 
 def _behavior_target(fd_by_name: dict, filenames) -> tuple[object, tuple[int, int, str]] | None:
-    """The behavior's file to anchor on: highest story tier, ties by churn desc.
-
-    Anchors on the definition rather than on whichever file sorts first. Falls
-    through the ranked list because a rename or binary file has no hunk to
-    anchor to.
-    """
+    """Highest-story-tier file with an anchorable hunk, churn-descending on ties."""
     ranked = sorted(
         (fd_by_name[n] for n in filenames if n in fd_by_name),
         key=lambda fd: (order.story_tier(fd.filename), -(fd.additions + fd.deletions)),
@@ -417,7 +412,7 @@ def post_behavior_comment(req: BehaviorCommentRequest) -> BehaviorCommentRespons
             line=end, side=side, start_line=start if start < end else None,
             start_side=side,
         )
-        anchored, path, line = ok, fd.filename, end
+        anchored, path, line = ok, (fd.filename if ok else None), (end if ok else None)
 
     if ok:
         def mutate(state: dict) -> dict:

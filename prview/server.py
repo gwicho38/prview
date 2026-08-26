@@ -36,6 +36,8 @@ import prview.state_store as state_store
 from prview.api_models import (
     ArchiveRequest,
     AskRequest,
+    BehaviorCommentRequest,
+    BehaviorCommentResponse,
     BehaviorModel,
     BehaviorsResponse,
     CommentRequest,
@@ -368,6 +370,62 @@ def post_comment(req: CommentRequest) -> OkResponse:
 
         state_store.mutate_state(req.owner, req.repo, req.number, mutate)
     return OkResponse(ok=ok)
+
+
+def _behavior_target(fd_by_name: dict, filenames) -> tuple[object, tuple[int, int, str]] | None:
+    """The behavior's file to anchor on: highest story tier, ties by churn desc.
+
+    Anchors on the definition rather than on whichever file sorts first. Falls
+    through the ranked list because a rename or binary file has no hunk to
+    anchor to.
+    """
+    ranked = sorted(
+        (fd_by_name[n] for n in filenames if n in fd_by_name),
+        key=lambda fd: (order.story_tier(fd.filename), -(fd.additions + fd.deletions)),
+    )
+    for fd in ranked:
+        span = core.first_hunk_range(fd.diff_text)
+        if span:
+            return fd, span
+    return None
+
+
+@app.post("/behaviors/comment", response_model=BehaviorCommentResponse)
+def post_behavior_comment(req: BehaviorCommentRequest) -> BehaviorCommentResponse:
+    derived, _, _ = _behaviors_for(req.owner, req.repo, req.number)
+    match = next((b for b in derived if b.id == req.behavior_id), None)
+    if match is None:
+        raise _err(404, f"Behavior not in PR: {req.behavior_id}")
+
+    entry = _cached(req.owner, req.repo, req.number)
+    fd_by_name = {fd.filename: fd for fd in entry["files"]}
+    body = (
+        f"**On behavior: {match.title}**\n"
+        f"({', '.join(match.filenames)})\n\n"
+        f"{req.text}"
+    )
+
+    target = _behavior_target(fd_by_name, match.filenames)
+    if target is None:
+        ok = gh.post_pr_comment_file(req.owner, req.repo, req.number, body)
+        anchored, path, line = False, None, None
+    else:
+        fd, (start, end, side) = target
+        commit_id = gh.pr_head_sha(req.owner, req.repo, req.number)
+        ok = gh.post_pr_review_comment(
+            req.owner, req.repo, req.number, fd.filename, body, commit_id,
+            line=end, side=side, start_line=start if start < end else None,
+            start_side=side,
+        )
+        anchored, path, line = ok, fd.filename, end
+
+    if ok:
+        def mutate(state: dict) -> dict:
+            state["comments"] = int(state.get("comments", 0)) + 1
+            return state
+
+        state_store.mutate_state(req.owner, req.repo, req.number, mutate)
+    return BehaviorCommentResponse(ok=ok, anchored=anchored, path=path, line=line)
 
 
 def _flagged_body(state: dict) -> str:

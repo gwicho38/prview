@@ -516,3 +516,74 @@ def test_ai_behavior_names_starts_a_job(client, monkeypatch):
     resp = client.post("/ai/behavior-names", json={"owner": "octo", "repo": "hello", "number": 7})
     assert resp.status_code == 200
     assert resp.json()["job_id"] == "job-xyz"
+
+
+def test_behavior_comment_anchors_to_the_highest_tier_files_first_hunk(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    seen = {}
+
+    def capture(owner, repo, number, path, text, commit_id, line, side="RIGHT",
+               start_line=None, start_side=None):
+        seen.update(path=path, text=text, line=line, side=side, start_line=start_line)
+        return True
+
+    monkeypatch.setattr(gh, "post_pr_review_comment", capture)
+    monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "sha-a")
+    resp = client.post("/behaviors/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "behavior_id": "b1", "text": "why the churn tiebreak?",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"ok": True, "anchored": True, "path": "big.py", "line": body["line"]}
+    assert seen["path"] == "big.py"
+    assert seen["text"].startswith("**On behavior: feat: big**")
+    assert "(big.py)" in seen["text"]
+    assert "why the churn tiebreak?" in seen["text"]
+
+
+def test_behavior_comment_falls_back_to_a_file_comment_without_an_anchor(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    monkeypatch.setattr(core, "first_hunk_range", lambda diff_text: None)
+    posted = {}
+
+    def capture_file(owner, repo, number, body):
+        posted["body"] = body
+        return True
+
+    monkeypatch.setattr(gh, "post_pr_comment_file", capture_file)
+    body = client.post("/behaviors/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "behavior_id": "b1", "text": "no anchor here",
+    }).json()
+    assert body["ok"] is True
+    assert body["anchored"] is False
+    assert "**On behavior: feat: big**" in posted["body"]
+
+
+def test_behavior_comment_404s_on_an_unknown_behavior_id(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    resp = client.post("/behaviors/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "behavior_id": "b99", "text": "ghost",
+    })
+    assert resp.status_code == 404
+
+
+def test_behavior_comment_increments_the_review_comment_count(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    monkeypatch.setattr(gh, "post_pr_review_comment", lambda *a, **k: True)
+    monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "sha-a")
+    client.post("/behaviors/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "behavior_id": "b1", "text": "counted",
+    })
+    assert client.get("/state/octo/hello/7").json()["comments"] == 1

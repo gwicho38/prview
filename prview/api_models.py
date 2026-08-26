@@ -421,3 +421,15 @@ class OverviewModel(BaseModel):
     markdown: str | None = None
     sha: str | None = None
     stale: bool = False
+
+
+class BehaviorCommentRequest(PRTarget):
+    behavior_id: str
+    text: str
+
+
+class BehaviorCommentResponse(BaseModel):
+    ok: bool
+    anchored: bool
+    path: str | None = None
+    line: int | None = None

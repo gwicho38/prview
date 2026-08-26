@@ -495,6 +495,19 @@ def test_behaviors_endpoint_409s_without_a_loaded_pr(client):
     assert client.get("/pr/octo/hello/7/behaviors").status_code == 409
 
 
+def test_behaviors_endpoint_409s_when_a_commits_file_list_is_unreachable(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(gh, "fetch_pr_commits", lambda o, r, n: _fake_commits())
+
+    def boom(o, r, sha):
+        raise gh.GhError(f"Failed to fetch commit {sha[:7]}: gone", hint="run `gh auth login`")
+
+    monkeypatch.setattr(gh, "fetch_commit_files", boom)
+    resp = client.get("/pr/octo/hello/7/behaviors")
+    assert resp.status_code == 409
+    assert resp.json()["hint"]
+
+
 def test_ai_behavior_names_starts_a_job(client, monkeypatch):
     _load_pr(client, monkeypatch)
     _wire_commits(monkeypatch)

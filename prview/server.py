@@ -189,12 +189,15 @@ def _behaviors_for(owner: str, repo: str, number: int) -> tuple[list, str, bool]
         raise _err(409, str(e), getattr(e, "hint", None))
     groupable = behaviors.is_groupable(commits)
     if key not in _BEHAVIOR_CACHE:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            listed = pool.map(
-                lambda sha: (sha, gh.fetch_commit_files(owner, repo, sha)),
-                [c["sha"] for c in commits if not c["is_merge"]],
-            )
-            files_by_sha = dict(listed)
+        try:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                listed = pool.map(
+                    lambda sha: (sha, gh.fetch_commit_files(owner, repo, sha)),
+                    [c["sha"] for c in commits if not c["is_merge"]],
+                )
+                files_by_sha = dict(listed)
+        except gh.GhError as e:
+            raise _err(409, str(e), getattr(e, "hint", None))
         _BEHAVIOR_CACHE[key] = behaviors.behaviors_from_commits(
             commits, files_by_sha, {f.filename for f in files})
     return _BEHAVIOR_CACHE[key], pr.head_sha, groupable

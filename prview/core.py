@@ -249,8 +249,6 @@ def added_line_numbers(diff_text: str) -> list[int]:
             continue
         if not in_hunk:
             continue
-        if line.startswith("+++"):
-            continue
         if line.startswith("+"):
             added.append(new_no)
             new_no += 1
@@ -297,7 +295,7 @@ def first_hunk_range(diff_text: str) -> tuple[int, int, str] | None:
             in_hunk = True
             added, removed = [], []
             continue
-        if not in_hunk or line.startswith(("+++", "---")):
+        if not in_hunk:
             continue
         if line.startswith("+"):
             added.append(new_no)
@@ -517,7 +515,8 @@ def build_behavior_names_prompt(pr: PRInfo, derived: list) -> str:
     commit subjects already carry, and diffs are what make the prompt expensive.
     """
     listing = "\n".join(
-        f"{b.id} — {b.title} ({', '.join(b.filenames)})" for b in derived
+        f"{b.id} — {b.title} — {', '.join(b.source_shas)} — ({', '.join(b.filenames)})"
+        for b in derived
     )
     return (
         f"A pull request titled \"{pr.title}\" is grouped into behaviors, one per commit.\n\n"

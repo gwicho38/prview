@@ -470,6 +470,22 @@ def test_behaviors_are_cached_per_head_sha(client, monkeypatch):
     assert sorted(calls) == ["s1", "s2"], "second request must not re-fetch commit files"
 
 
+def test_behaviors_cache_hit_never_refetches_commits(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    calls = []
+
+    def commits(o, r, n):
+        calls.append(1)
+        return _fake_commits()
+
+    monkeypatch.setattr(gh, "fetch_pr_commits", commits)
+    monkeypatch.setattr(gh, "fetch_commit_files",
+                        lambda o, r, sha: {"s1": ["big.py"], "s2": ["small.py"]}[sha])
+    client.get("/pr/octo/hello/7/behaviors")
+    client.get("/pr/octo/hello/7/behaviors")
+    assert len(calls) == 1, "a cache hit must not spawn a gh subprocess"
+
+
 def test_behaviors_endpoint_reports_a_single_commit_pr_as_ungroupable(client, monkeypatch):
     _load_pr(client, monkeypatch)
     monkeypatch.setattr(gh, "fetch_pr_commits",
@@ -599,6 +615,34 @@ def test_behavior_comment_404s_on_an_unknown_behavior_id(client, monkeypatch):
         "behavior_id": "b99", "text": "ghost",
     })
     assert resp.status_code == 404
+
+
+def test_behavior_comment_is_recorded_in_comment_threads(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    monkeypatch.setattr(gh, "post_pr_review_comment", lambda *a, **k: True)
+    monkeypatch.setattr(gh, "pr_head_sha", lambda o, r, n: "sha-a")
+    client.post("/behaviors/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "behavior_id": "b1", "text": "on the record",
+    })
+    st = core.load_review_state("octo", "hello", 7)
+    assert st["comment_threads"]["big.py"] == [{"text": "on the record", "line": 5, "start_line": 1}]
+
+
+def test_behavior_comment_fallback_does_not_record_a_thread(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    monkeypatch.setattr(core, "first_hunk_range", lambda diff_text: None)
+    monkeypatch.setattr(gh, "post_pr_comment_file", lambda *a, **k: True)
+    client.post("/behaviors/comment", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "behavior_id": "b1", "text": "no anchor here",
+    })
+    st = core.load_review_state("octo", "hello", 7)
+    assert st.get("comment_threads", {}) == {}
 
 
 def test_behavior_comment_increments_the_review_comment_count(client, monkeypatch):

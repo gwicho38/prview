@@ -97,3 +97,23 @@ def test_first_hunk_range_returns_none_without_hunks():
 def test_first_hunk_range_ignores_the_diff_header_plus_lines():
     diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,2 @@\n ctx\n+real\n"
     assert core.first_hunk_range(diff) == (2, 2, "RIGHT")
+
+
+def test_first_hunk_range_keeps_an_added_line_whose_content_starts_with_plusplusplus():
+    diff = (
+        "diff --git a/x.patch b/x.patch\n--- a/x.patch\n+++ b/x.patch\n"
+        "@@ -0,0 +1,4 @@\n"
+        "+--- a/x\n"
+        "++++ b/x\n"
+        "+@@ -1 +1 @@\n"
+        "++real\n"
+    )
+    assert core.first_hunk_range(diff) == (1, 4, "RIGHT")
+
+
+def test_first_hunk_range_keeps_a_removed_line_whose_content_starts_with_dashdashdash():
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+        "@@ -5,3 +4,1 @@\n ctx\n----gone\n----also gone\n"
+    )
+    assert core.first_hunk_range(diff) == (6, 7, "LEFT")

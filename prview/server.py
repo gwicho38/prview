@@ -178,31 +178,34 @@ def get_pr(owner: str, repo: str, n: int) -> PRResponse:
 
 
 # Grouping costs N+1 gh calls, so it's computed on first use and kept until the head SHA moves.
-_BEHAVIOR_CACHE: dict[tuple[str, str, int, str], list] = {}
+_BEHAVIOR_CACHE: dict[tuple[str, str, int, str], tuple[list, bool]] = {}
 
 
 def _behaviors_for(owner: str, repo: str, number: int) -> tuple[list, str, bool]:
     entry = _cached(owner, repo, number)
     pr, files = entry["pr"], entry["files"]
     key = (owner, repo, number, pr.head_sha)
+    if key in _BEHAVIOR_CACHE:
+        derived, groupable = _BEHAVIOR_CACHE[key]
+        return derived, pr.head_sha, groupable
     try:
         commits = gh.fetch_pr_commits(owner, repo, number)
     except gh.GhError as e:
         raise _err(409, str(e), getattr(e, "hint", None))
     groupable = behaviors.is_groupable(commits)
-    if key not in _BEHAVIOR_CACHE:
-        try:
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                listed = pool.map(
-                    lambda sha: (sha, gh.fetch_commit_files(owner, repo, sha)),
-                    [c["sha"] for c in commits if not c["is_merge"]],
-                )
-                files_by_sha = dict(listed)
-        except gh.GhError as e:
-            raise _err(409, str(e), getattr(e, "hint", None))
-        _BEHAVIOR_CACHE[key] = behaviors.behaviors_from_commits(
-            commits, files_by_sha, {f.filename for f in files})
-    return _BEHAVIOR_CACHE[key], pr.head_sha, groupable
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            listed = pool.map(
+                lambda sha: (sha, gh.fetch_commit_files(owner, repo, sha)),
+                [c["sha"] for c in commits if not c["is_merge"]],
+            )
+            files_by_sha = dict(listed)
+    except gh.GhError as e:
+        raise _err(409, str(e), getattr(e, "hint", None))
+    derived = behaviors.behaviors_from_commits(
+        commits, files_by_sha, {f.filename for f in files})
+    _BEHAVIOR_CACHE[key] = (derived, groupable)
+    return derived, pr.head_sha, groupable
 
 
 @app.get("/pr/{owner}/{repo}/{n}/behaviors", response_model=BehaviorsResponse)
@@ -217,14 +220,14 @@ def get_behaviors(owner: str, repo: str, n: int) -> BehaviorsResponse:
 
 @app.post("/ai/behavior-names", response_model=JobIdResponse)
 def post_ai_behavior_names(req: PRTarget) -> JobIdResponse:
-    derived, head_sha, _ = _behaviors_for(req.owner, req.repo, req.number)
+    derived, head_sha, groupable = _behaviors_for(req.owner, req.repo, req.number)
     entry = _cached(req.owner, req.repo, req.number)
     key = (req.owner, req.repo, req.number, head_sha)
 
     def apply(result: str):
         named = behaviors.apply_behavior_names(derived, result)
         if named:
-            _BEHAVIOR_CACHE[key] = named
+            _BEHAVIOR_CACHE[key] = (named, groupable)
 
     return JobIdResponse(
         job_id=jobs.start_behavior_names(entry["pr"], derived, on_done=apply))
@@ -411,7 +414,7 @@ def post_behavior_comment(req: BehaviorCommentRequest) -> BehaviorCommentRespons
     target = _behavior_target(fd_by_name, match.filenames)
     if target is None:
         ok = gh.post_pr_comment_file(req.owner, req.repo, req.number, body)
-        anchored, path, line = False, None, None
+        anchored, path, line, start_line = False, None, None, None
     else:
         fd, (start, end, side) = target
         commit_id = gh.pr_head_sha(req.owner, req.repo, req.number)
@@ -421,10 +424,16 @@ def post_behavior_comment(req: BehaviorCommentRequest) -> BehaviorCommentRespons
             start_side=side,
         )
         anchored, path, line = ok, (fd.filename if ok else None), (end if ok else None)
+        start_line = start if start < end else None
 
     if ok:
         def mutate(state: dict) -> dict:
             state["comments"] = int(state.get("comments", 0)) + 1
+            if anchored and path:
+                thread_entry = {"text": req.text, "line": line, "start_line": start_line}
+                threads = dict(state.get("comment_threads", {}))
+                threads[path] = [*threads.get(path, []), thread_entry]
+                state["comment_threads"] = threads
             return state
 
         state_store.mutate_state(req.owner, req.repo, req.number, mutate)

@@ -80,7 +80,14 @@ def test_behavior_grouping_persists_and_is_keyed_separately():
 
 
 def test_behavior_grouping_is_toggled_by_shift_g():
-    assert 'case "G": e.preventDefault(); toggleGrouped(); break;' in APP_JS
+    assert 'case "G": e.preventDefault(); if (!State.standalone) toggleGrouped(); break;' in APP_JS
+
+
+def test_toggle_grouped_derives_intent_from_active_grouping_not_the_flag():
+    fn = APP_JS[APP_JS.index("async function toggleGrouped("):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "groupingActive()" in fn
+    assert "!State.grouped" not in fn
 
 
 def test_behavior_rows_keep_their_flat_file_index():
@@ -96,7 +103,7 @@ def test_a_file_touched_by_later_behaviors_is_badged():
 
 def test_behavior_comment_posts_to_the_behavior_endpoint():
     assert 'api("POST", "/behaviors/comment"' in APP_JS
-    assert "On behavior" in APP_JS or "openBehaviorCommentModal" in APP_JS
+    assert "Comment on behavior" in APP_JS
 
 
 def test_behavior_names_is_by_election_not_automatic():
@@ -114,6 +121,22 @@ def test_behavior_naming_uses_the_shared_job_poller_not_a_hand_rolled_interval()
     assert "setInterval" not in APP_JS
 
 
+def test_behavior_naming_control_is_a_play_stop_toggle_that_clears_the_job_id():
+    start = APP_JS[APP_JS.index("async function startBehaviorNaming("):]
+    start = start[:start.index("\n}\n")]
+    assert start.count("_behaviorNameJobId = null;") == 2  # onDone and onError
+
+    stop = APP_JS[APP_JS.index("async function stopBehaviorNaming("):]
+    stop = stop[:stop.index("\n}\n")]
+    assert "/job/${jobId}/cancel" in stop
+
+    name_btn = APP_JS[APP_JS.index('name.className = "btn btn-ghost fl-behavior-name";'):]
+    name_btn = name_btn[:name_btn.index("controls.appendChild(name);")]
+    assert '"■ Stop"' in name_btn
+    assert '"▶ Name"' in name_btn
+    assert "stopBehaviorNaming" in name_btn
+
+
 def test_nav_and_nearest_visible_read_the_rendered_row_order():
     nav = APP_JS[APP_JS.index("function navTo("):]
     nav = nav[:nav.index("\n}\n")]
@@ -122,6 +145,32 @@ def test_nav_and_nearest_visible_read_the_rendered_row_order():
     nearest = APP_JS[APP_JS.index("function nearestVisible("):]
     nearest = nearest[:nearest.index("\n}\n")]
     assert "State.rowOrder" in nearest
+
+
+def test_collapse_and_hide_tests_share_the_visible_row_helper():
+    assert "function keepCurrentVisible()" in APP_JS
+
+    caret = APP_JS[APP_JS.index('caret.addEventListener("click"'):]
+    caret = caret[:caret.index("\n    });\n")]
+    assert "keepCurrentVisible();" in caret
+
+    fn = APP_JS[APP_JS.index("function toggleHideTests("):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "keepCurrentVisible();" in fn
+
+
+def test_a_transient_load_failure_lets_the_next_toggle_retry():
+    fn = APP_JS[APP_JS.index("async function loadBehaviors("):]
+    fn = fn[:fn.index("\n}\n")]
+    catch_block = fn[fn.index("catch (e) {"):]
+    assert "State.behaviors = null;" in catch_block
+
+
+def test_ungroupable_disables_the_group_toggle():
+    toggle = APP_JS[APP_JS.index('const grp = document.createElement("button");'):]
+    toggle = toggle[:toggle.index("controls.appendChild(grp);")]
+    assert "grp.disabled = ungroupable;" in toggle
+    assert "Single commit" in toggle
 
 
 def test_group_toggle_label_reflects_active_grouping_not_the_preference_alone():

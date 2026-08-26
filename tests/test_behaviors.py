@@ -153,3 +153,32 @@ def test_names_reply_is_rejected_for_an_empty_title():
 
 def test_names_reply_is_rejected_when_it_contains_no_mapping_lines():
     assert behaviors.apply_behavior_names(_derived(), "I could not determine any behaviors.") is None
+
+
+def test_names_reply_caps_a_pathological_title_length():
+    got = behaviors.apply_behavior_names(_derived(), f"""
+b1 -> {"x" * 500}
+b2 -> Two
+b3 -> Three
+""")
+    assert len(got[0].title) == 120
+    assert got[0].title.endswith("…")
+
+
+def test_merging_a_behavior_with_its_only_other_toucher_drops_the_self_reference():
+    derived = [
+        behaviors.Behavior("b1", "feat: model", ("a",), ("model.py",), also_in={"model.py": 1}),
+        behaviors.Behavior("b2", "feat: wire", ("b",), ("server.py",)),
+    ]
+    got = behaviors.apply_behavior_names(derived, "b1+b2 -> Orders end to end")
+    assert got[0].also_in == {}
+
+
+def test_merging_keeps_an_also_in_count_for_a_toucher_outside_the_merge():
+    derived = [
+        behaviors.Behavior("b1", "feat: model", ("a",), ("model.py",), also_in={"model.py": 2}),
+        behaviors.Behavior("b2", "feat: wire", ("b",), ("server.py",)),
+        behaviors.Behavior("b3", "chore: lint", ("c",), ("style.css",)),
+    ]
+    got = behaviors.apply_behavior_names(derived, "b1+b2 -> Orders end to end\nb3 -> Lint")
+    assert got[0].also_in == {"model.py": 1}

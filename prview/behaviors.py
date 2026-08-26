@@ -74,6 +74,12 @@ _NAME_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_TITLE_CAP = 120
+
+
+def _capped_title(title: str) -> str:
+    return title if len(title) <= _TITLE_CAP else title[: _TITLE_CAP - 1].rstrip() + "…"
+
 
 def apply_behavior_names(derived: list[Behavior], reply: str) -> list[Behavior] | None:
     """Apply an AI reply's renames, adjacent merges and noise flags to `derived`.
@@ -108,12 +114,18 @@ def apply_behavior_names(derived: list[Behavior], reply: str) -> list[Behavior] 
     out: list[Behavior] = []
     for n, (positions, title, noise) in enumerate(groups, start=1):
         members = [derived[p] for p in positions]
+        # A count can only name behaviors past this group's last merged position —
+        # anything earlier just got folded into this same group and is no longer "other".
+        external_capacity = len(derived) - 1 - positions[-1]
         merged_also: dict[str, int] = {}
         for b in members:
-            merged_also.update(b.also_in)
+            for filename, count in b.also_in.items():
+                capped = min(count, external_capacity)
+                if capped > 0:
+                    merged_also[filename] = capped
         out.append(Behavior(
             id=f"b{n}",
-            title=title,
+            title=_capped_title(title),
             source_shas=tuple(s for b in members for s in b.source_shas),
             filenames=tuple(f for b in members for f in b.filenames),
             also_in=merged_also,

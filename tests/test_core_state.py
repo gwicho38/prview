@@ -102,6 +102,19 @@ def test_added_line_numbers_empty_for_no_additions():
     assert added_line_numbers(diff) == []
 
 
+def test_added_line_numbers_keeps_an_added_line_that_looks_like_a_diff_header():
+    from prview.core import added_line_numbers
+    diff = (
+        "diff --git a/x.patch b/x.patch\n--- a/x.patch\n+++ b/x.patch\n"
+        "@@ -0,0 +1,4 @@\n"
+        "+--- a/x\n"
+        "++++ b/x\n"
+        "+@@ -1 +1 @@\n"
+        "++real\n"
+    )
+    assert added_line_numbers(diff) == [1, 2, 3, 4]
+
+
 def test_overview_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_CACHE_DIR", tmp_path)
     core.save_overview("o", "r", 1, "sha-a", "# Overview\n```\nbox\n```")

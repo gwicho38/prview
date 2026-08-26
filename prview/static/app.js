@@ -700,7 +700,9 @@ function renderFileList() {
     const grp = document.createElement("button");
     grp.className = "btn btn-ghost fl-group-toggle";
     grp.textContent = groupingActive() ? "Grouped" : "Flat";
-    grp.title = "Group files by behavior (G)";
+    const ungroupable = State.behaviors !== null && State.behaviors.length === 0;
+    grp.title = ungroupable ? "Single commit — nothing to group" : "Group files by behavior (G)";
+    grp.disabled = ungroupable;
     grp.setAttribute("aria-pressed", String(groupingActive()));
     grp.addEventListener("click", toggleGrouped);
     controls.appendChild(grp);
@@ -708,9 +710,15 @@ function renderFileList() {
   if (groupingActive()) {
     const name = document.createElement("button");
     name.className = "btn btn-ghost fl-behavior-name";
-    name.textContent = "▶ Name";
-    name.title = "Rewrite behavior titles with AI";
-    name.addEventListener("click", startBehaviorNaming);
+    if (_behaviorNameJobId) {
+      name.textContent = "■ Stop";
+      name.title = "Stop naming behaviors";
+      name.addEventListener("click", stopBehaviorNaming);
+    } else {
+      name.textContent = "▶ Name";
+      name.title = "Rewrite behavior titles with AI";
+      name.addEventListener("click", startBehaviorNaming);
+    }
     controls.appendChild(name);
   }
 
@@ -839,14 +847,7 @@ function renderGroupedRows(rows, order) {
     caret.setAttribute("aria-expanded", String(!collapsed));
     caret.addEventListener("click", () => {
       State.collapsed[b.id] = !collapsed;
-      renderFileList();
-      // The file that was open may have just left the rendered set; find it a new home.
-      if (!State.rowOrder.includes(State.idx)) {
-        const i = nearestVisible(State.idx);
-        if (i >= 0) State.idx = i;
-        renderFileList();
-      }
-      renderFileDetail();
+      keepCurrentVisible();
     });
     const meta = document.createElement("span");
     meta.className = "fl-behavior-meta";
@@ -898,6 +899,18 @@ function nearestVisible(from) {
   return order.reduce((best, i) => Math.abs(i - from) < Math.abs(best - from) ? i : best);
 }
 
+// Re-render after a change that may have hidden the current row (collapse, hide-tests
+// toggle), giving the detail pane a new home when its file just left the rendered set.
+function keepCurrentVisible() {
+  renderFileList();
+  if (!State.rowOrder.includes(State.idx)) {
+    const i = nearestVisible(State.idx);
+    if (i >= 0) State.idx = i;
+    renderFileList();
+  }
+  renderFileDetail();
+}
+
 // Reorder State.files in place per State.orders. Bails on any mismatch with the
 // server's list rather than dropping a file from the review.
 function applyOrder() {
@@ -927,15 +940,17 @@ async function loadBehaviors() {
     State.behaviors = res.groupable ? res.behaviors : [];
     if (!res.groupable) toast("Single commit — nothing to group", "error");
   } catch (e) {
-    State.behaviors = [];
+    // Transient (e.g. gh) failure — leave State.behaviors unset so the next toggle retries.
+    State.behaviors = null;
     toast(e.message || "could not group by behavior", "error");
   }
 }
 
 async function toggleGrouped() {
-  State.grouped = !State.grouped;
-  try { localStorage.setItem(GROUP_KEY, State.grouped ? "1" : "0"); } catch { /* best-effort */ }
-  if (State.grouped && State.behaviors === null) await loadBehaviors();
+  const want = !groupingActive();
+  State.grouped = want;
+  try { localStorage.setItem(GROUP_KEY, want ? "1" : "0"); } catch { /* best-effort */ }
+  if (want && State.behaviors === null) await loadBehaviors();
   renderFileList();
 }
 
@@ -952,14 +967,7 @@ function cycleOrder() {
 
 function toggleHideTests() {
   State.hideTests = !State.hideTests;
-  renderFileList();
-  // Keep the detail pane off a file that just got hidden; rowOrder is now fresh, post-toggle.
-  if (!State.rowOrder.includes(State.idx)) {
-    const i = nearestVisible(State.idx);
-    if (i >= 0) State.idx = i;
-    renderFileList();
-  }
-  renderFileDetail();
+  keepCurrentVisible();
 }
 
 function selectFile(i) {
@@ -2032,17 +2040,30 @@ async function startBehaviorNaming() {
     const { job_id } = await api("POST", "/ai/behavior-names", prKey());
     _behaviorNameJobId = job_id;
     toast("Naming behaviors…");
+    renderFileList();
     pollJobId(job_id, {
       alive: () => _behaviorNameJobId === job_id,
       onDone: async () => {
+        _behaviorNameJobId = null;
         await loadBehaviors();   // server-side apply is the source of truth
         renderFileList();
       },
-      onError: (snap) => toast(snap.error || "behavior naming failed", "error"),
+      onError: (snap) => {
+        _behaviorNameJobId = null;
+        toast(snap.error || "behavior naming failed", "error");
+        renderFileList();
+      },
     });
   } catch (e) {
     toast(e.message || "behavior naming failed", "error");
   }
+}
+
+async function stopBehaviorNaming() {
+  const jobId = _behaviorNameJobId;
+  _behaviorNameJobId = null;
+  renderFileList();
+  if (jobId) { try { await api("POST", `/job/${jobId}/cancel`); } catch { /* best-effort */ } }
 }
 
 // ---- component:flag-modal --------------------------------------------------
@@ -3269,7 +3290,7 @@ document.addEventListener("keydown", (e) => {
     case "f": e.preventDefault(); openFlagModal(); break;
     case "t": e.preventDefault(); toggleHideTests(); break;
     case "o": e.preventDefault(); cycleOrder(); break;
-    case "G": e.preventDefault(); toggleGrouped(); break;
+    case "G": e.preventDefault(); if (!State.standalone) toggleGrouped(); break;
     case "s": e.preventDefault(); show("submit"); break;
     case "q": case "Escape": e.preventDefault(); show("landing"); break;
   }

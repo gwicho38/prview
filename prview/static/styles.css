@@ -369,7 +369,7 @@ a { color: var(--accent); }
 .fl-behavior-meta { flex: 0 0 auto; color: var(--fg-dim); }
 .fl-behavior-noise { opacity: 0.65; }
 .fl-behavior-comment { padding: 0 4px; }
-.fl-also-in { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); }
+.fl-also-in { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); flex: 0 0 auto; white-space: nowrap; }
 .fl-tests-toggle { font-family: var(--mono); font-size: 11px; padding: 2px 7px; }
 .fl-tests-toggle[aria-pressed="true"] { color: var(--fg); border-color: var(--border); }
 .fl-empty { padding: 14px; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }

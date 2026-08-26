@@ -104,3 +104,30 @@ def test_behavior_names_is_by_election_not_automatic():
     # No call site may fire naming from the grouping load path.
     load = APP_JS[APP_JS.index("async function loadBehaviors("):]
     assert "/ai/behavior-names" not in load[:load.index("\n}\n")]
+
+
+def test_behavior_naming_uses_the_shared_job_poller_not_a_hand_rolled_interval():
+    fn = APP_JS[APP_JS.index("async function startBehaviorNaming("):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "pollJobId(" in fn
+    assert "setInterval" not in fn
+    assert "setInterval" not in APP_JS
+
+
+def test_nav_and_nearest_visible_read_the_rendered_row_order():
+    nav = APP_JS[APP_JS.index("function navTo("):]
+    nav = nav[:nav.index("\n}\n")]
+    assert "State.rowOrder" in nav
+
+    nearest = APP_JS[APP_JS.index("function nearestVisible("):]
+    nearest = nearest[:nearest.index("\n}\n")]
+    assert "State.rowOrder" in nearest
+
+
+def test_group_toggle_label_reflects_active_grouping_not_the_preference_alone():
+    assert "function groupingActive()" in APP_JS
+    toggle = APP_JS[APP_JS.index('const grp = document.createElement("button");'):]
+    toggle = toggle[:toggle.index("controls.appendChild(grp);")]
+    assert "groupingActive()" in toggle
+    assert "State.grouped ?" not in toggle
+    assert "String(State.grouped)" not in toggle

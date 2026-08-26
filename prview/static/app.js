@@ -66,6 +66,7 @@ const State = {
   grouped: false,       // sidebar groups files under behaviors
   behaviors: null,      // [BehaviorModel] once loaded; null = not fetched
   collapsed: {},        // behavior id -> true; per-PR, not a preference
+  rowOrder: [],          // flat indices in the exact order the sidebar last rendered
 };
 
 function prKey() {
@@ -543,12 +544,21 @@ function isTestFile(filename) {
 // A file is hidden when the show/hide-tests toggle is off and it's a test file.
 function isHidden(f) { return State.hideTests && isTestFile(f.filename); }
 
+// True once grouping is both toggled on AND has behaviors to show; drives every group-mode branch.
+function groupingActive() {
+  return State.grouped && !!(State.behaviors && State.behaviors.length);
+}
+
+// Single source of truth for a behavior's default collapse state, read by the header and the count.
+function isBehaviorCollapsed(b) {
+  return State.collapsed[b.id] ?? b.noise;
+}
+
 // A file in a collapsed behavior must drop out of the progress count too, like a hidden test file.
 function isCollapsedByBehavior(f) {
-  if (!State.grouped || !State.behaviors) return false;
+  if (!groupingActive()) return false;
   const b = behaviorOf(f.filename);
-  if (!b) return false;
-  return State.collapsed[b.id] ?? b.noise;
+  return b ? isBehaviorCollapsed(b) : false;
 }
 
 function renderSummary() {
@@ -689,13 +699,13 @@ function renderFileList() {
   if (!State.standalone) {
     const grp = document.createElement("button");
     grp.className = "btn btn-ghost fl-group-toggle";
-    grp.textContent = State.grouped ? "Grouped" : "Flat";
+    grp.textContent = groupingActive() ? "Grouped" : "Flat";
     grp.title = "Group files by behavior (G)";
-    grp.setAttribute("aria-pressed", String(State.grouped));
+    grp.setAttribute("aria-pressed", String(groupingActive()));
     grp.addEventListener("click", toggleGrouped);
     controls.appendChild(grp);
   }
-  if (State.grouped && State.behaviors && State.behaviors.length) {
+  if (groupingActive()) {
     const name = document.createElement("button");
     name.className = "btn btn-ghost fl-behavior-name";
     name.textContent = "▶ Name";
@@ -728,14 +738,17 @@ function renderFileList() {
 
   const rows = document.createElement("div");
   rows.className = "fl-rows";
-  if (State.grouped && State.behaviors && State.behaviors.length) {
-    renderGroupedRows(rows);
+  const order = [];
+  if (groupingActive()) {
+    renderGroupedRows(rows, order);
   } else {
     State.files.forEach((f, i) => {
       if (isHidden(f)) return;
+      order.push(i);
       rows.appendChild(buildRow(f, i));
     });
   }
+  State.rowOrder = order;
 
   if (!rows.childElementCount) {
     const note = document.createElement("div");
@@ -792,21 +805,21 @@ function buildRow(f, i) {
 
   row.append(marker, name, counts, badges);
 
-  const also = State.grouped && State.behaviors
-    ? (behaviorOf(f.filename) || {}).also_in : null;
+  // Appended to the name cell, not the row grid, so it stays inline instead of forming a 5th track.
+  const also = groupingActive() ? (behaviorOf(f.filename) || {}).also_in : null;
   if (also && also[f.filename]) {
     const badge = document.createElement("span");
     badge.className = "fl-also-in";
     badge.textContent = `also in ${also[f.filename]}`;
     badge.title = `${also[f.filename]} later behavior(s) also touch this file`;
-    row.appendChild(badge);
+    name.appendChild(badge);
   }
 
   row.addEventListener("click", () => selectFile(i));
   return row;
 }
 
-function renderGroupedRows(rows) {
+function renderGroupedRows(rows, order) {
   const byName = new Map(State.files.map((f, i) => [f.filename, i]));
   (State.behaviors || []).forEach((b, n) => {
     // Ascending index keeps the reviewer's chosen order; commit order would override it.
@@ -816,7 +829,7 @@ function renderGroupedRows(rows) {
       .sort((x, y) => x - y);
     const visible = mine.filter((i) => !isHidden(State.files[i]));
     if (!visible.length) return;
-    const collapsed = State.collapsed[b.id] ?? b.noise;
+    const collapsed = isBehaviorCollapsed(b);
 
     const head = document.createElement("div");
     head.className = "fl-behavior" + (b.noise ? " fl-behavior-noise" : "");
@@ -827,6 +840,13 @@ function renderGroupedRows(rows) {
     caret.addEventListener("click", () => {
       State.collapsed[b.id] = !collapsed;
       renderFileList();
+      // The file that was open may have just left the rendered set; find it a new home.
+      if (!State.rowOrder.includes(State.idx)) {
+        const i = nearestVisible(State.idx);
+        if (i >= 0) State.idx = i;
+        renderFileList();
+      }
+      renderFileDetail();
     });
     const meta = document.createElement("span");
     meta.className = "fl-behavior-meta";
@@ -841,7 +861,7 @@ function renderGroupedRows(rows) {
     rows.appendChild(head);
 
     if (collapsed) return;
-    visible.forEach((i) => rows.appendChild(buildRow(State.files[i], i)));
+    visible.forEach((i) => { order.push(i); rows.appendChild(buildRow(State.files[i], i)); });
   });
 
   const grouped = new Set((State.behaviors || []).flatMap((b) => b.filenames));
@@ -853,27 +873,29 @@ function renderGroupedRows(rows) {
     head.className = "fl-behavior";
     head.textContent = `Ungrouped · ${orphans.length} files`;
     rows.appendChild(head);
-    orphans.forEach(([f, i]) => rows.appendChild(buildRow(f, i)));
+    orphans.forEach(([f, i]) => { order.push(i); rows.appendChild(buildRow(f, i)); });
   }
 }
 
 function currentFile() { return State.files[State.idx]; }
 
+// Walks State.rowOrder, the exact sequence last rendered, so j/k can't disagree with the screen.
 function navTo(delta) {
-  if (!State.files.length) return;
+  const order = State.rowOrder;
+  if (!order || !order.length) return;
+  const pos = order.indexOf(State.idx);
   const step = delta < 0 ? -1 : 1;
-  for (let i = State.idx + step; i >= 0 && i < State.files.length; i += step) {
-    if (!isHidden(State.files[i])) { selectFile(i); return; }
-  }
+  if (pos === -1) { selectFile(step > 0 ? order[0] : order[order.length - 1]); return; }
+  const next = pos + step;
+  if (next >= 0 && next < order.length) selectFile(order[next]);
 }
 
-// Index of the visible file closest to `from`, searching outward; -1 if none.
+// The rendered row nearest `from` by raw file-index distance; -1 if nothing is rendered.
 function nearestVisible(from) {
-  for (let d = 0; d < State.files.length; d++) {
-    if (from + d < State.files.length && !isHidden(State.files[from + d])) return from + d;
-    if (from - d >= 0 && !isHidden(State.files[from - d])) return from - d;
-  }
-  return -1;
+  const order = State.rowOrder;
+  if (!order || !order.length) return -1;
+  if (order.includes(from)) return from;
+  return order.reduce((best, i) => Math.abs(i - from) < Math.abs(best - from) ? i : best);
 }
 
 // Reorder State.files in place per State.orders. Bails on any mismatch with the
@@ -930,12 +952,13 @@ function cycleOrder() {
 
 function toggleHideTests() {
   State.hideTests = !State.hideTests;
-  // Keep the detail pane off a file that just got hidden.
-  if (isHidden(currentFile())) {
+  renderFileList();
+  // Keep the detail pane off a file that just got hidden; rowOrder is now fresh, post-toggle.
+  if (!State.rowOrder.includes(State.idx)) {
     const i = nearestVisible(State.idx);
     if (i >= 0) State.idx = i;
+    renderFileList();
   }
-  renderFileList();
   renderFileDetail();
 }
 
@@ -2002,18 +2025,21 @@ function openBehaviorCommentModal(b) {
   });
 }
 
+let _behaviorNameJobId = null;
+
 async function startBehaviorNaming() {
   try {
     const { job_id } = await api("POST", "/ai/behavior-names", prKey());
+    _behaviorNameJobId = job_id;
     toast("Naming behaviors…");
-    const poll = setInterval(async () => {
-      const job = await api("GET", `/job/${job_id}`);
-      if (job.status === "running") return;
-      clearInterval(poll);
-      if (job.status !== "done" || !job.result) { toast("behavior naming failed", "error"); return; }
-      await loadBehaviors();   // server-side apply is the source of truth
-      renderFileList();
-    }, 1500);
+    pollJobId(job_id, {
+      alive: () => _behaviorNameJobId === job_id,
+      onDone: async () => {
+        await loadBehaviors();   // server-side apply is the source of truth
+        renderFileList();
+      },
+      onError: (snap) => toast(snap.error || "behavior naming failed", "error"),
+    });
   } catch (e) {
     toast(e.message || "behavior naming failed", "error");
   }

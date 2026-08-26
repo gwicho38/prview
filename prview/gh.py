@@ -236,6 +236,38 @@ def fetch_file_at_ref(owner: str, repo: str, path: str, ref: str) -> str:
     return result.stdout
 
 
+def fetch_pr_commits(owner: str, repo: str, number: int) -> list[dict]:
+    """The PR's commits, oldest first: sha, first line of the message, merge flag.
+
+    One page of 100 is deliberate — a PR with more commits than that has no
+    reviewable narrative left, and the endpoint stays a single round trip.
+    """
+    result = _run(
+        ["gh", "api", f"repos/{owner}/{repo}/pulls/{number}/commits?per_page=100"],
+    )
+    if result.returncode != 0:
+        raise GhError(f"Failed to fetch PR commits: {result.stderr.strip()}", hint=_AUTH_HINT)
+    commits = json.loads(result.stdout or "[]")
+    return [
+        {
+            "sha": c.get("sha", ""),
+            "subject": (c.get("commit", {}).get("message", "") or "").split("\n")[0].strip(),
+            "is_merge": len(c.get("parents", []) or []) > 1,
+        }
+        for c in commits
+        if c.get("sha")
+    ]
+
+
+def fetch_commit_files(owner: str, repo: str, sha: str) -> list[str]:
+    """Filenames touched by one commit."""
+    result = _run(["gh", "api", f"repos/{owner}/{repo}/commits/{sha}"])
+    if result.returncode != 0:
+        raise GhError(f"Failed to fetch commit {sha[:7]}: {result.stderr.strip()}", hint=_AUTH_HINT)
+    data = json.loads(result.stdout or "{}")
+    return [f["filename"] for f in data.get("files", []) or [] if f.get("filename")]
+
+
 def post_pr_review_comment(
     owner: str, repo: str, number: int, path: str, text: str, commit_id: str,
     line: int, side: str = "RIGHT", start_line: int | None = None,

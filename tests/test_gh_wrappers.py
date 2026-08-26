@@ -246,3 +246,33 @@ def test_latest_review_url_none_on_failure_or_empty(monkeypatch):
 
     monkeypatch.setattr(gh, "_run", lambda cmd: _sp.CompletedProcess(cmd, 0, stdout="{not json", stderr=""))
     assert gh.latest_review_url("o", "r", 9) is None
+
+
+def test_fetch_pr_commits_parses_subject_and_merge_flag(monkeypatch):
+    payload = json.dumps([
+        {"sha": "aaa", "commit": {"message": "feat: first\n\nbody"}, "parents": [{"sha": "p1"}]},
+        {"sha": "bbb", "commit": {"message": "Merge branch 'main'"}, "parents": [{"sha": "p1"}, {"sha": "p2"}]},
+    ])
+    monkeypatch.setattr(gh, "_run", lambda cmd: _Result(0, payload))
+    assert gh.fetch_pr_commits("o", "r", 7) == [
+        {"sha": "aaa", "subject": "feat: first", "is_merge": False},
+        {"sha": "bbb", "subject": "Merge branch 'main'", "is_merge": True},
+    ]
+
+
+def test_fetch_pr_commits_raises_structured_error(monkeypatch):
+    monkeypatch.setattr(gh, "_run", lambda cmd: _Result(1, "", "not logged in"))
+    with pytest.raises(gh.GhError) as ei:
+        gh.fetch_pr_commits("o", "r", 7)
+    assert ei.value.hint
+
+
+def test_fetch_commit_files_returns_filenames(monkeypatch):
+    payload = json.dumps({"files": [{"filename": "a.py"}, {"filename": "b/c.ts"}]})
+    monkeypatch.setattr(gh, "_run", lambda cmd: _Result(0, payload))
+    assert gh.fetch_commit_files("o", "r", "aaa") == ["a.py", "b/c.ts"]
+
+
+def test_fetch_commit_files_tolerates_a_commit_with_no_files(monkeypatch):
+    monkeypatch.setattr(gh, "_run", lambda cmd: _Result(0, json.dumps({})))
+    assert gh.fetch_commit_files("o", "r", "aaa") == []

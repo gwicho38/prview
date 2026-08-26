@@ -1,5 +1,6 @@
 import pytest
 
+import prview.core as core
 from prview.core import parse_pr_ref, parse_diff, FileDiff
 
 
@@ -61,3 +62,38 @@ def test_parse_diff_binary_chunk_no_crash():
     assert fd.filename == "image.png"
     assert fd.additions == 0
     assert fd.deletions == 0
+
+
+def test_first_hunk_range_anchors_added_lines_on_the_right():
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+        "@@ -10,2 +10,4 @@\n ctx\n+one\n+two\n ctx\n"
+    )
+    assert core.first_hunk_range(diff) == (11, 12, "RIGHT")
+
+
+def test_first_hunk_range_anchors_a_deletions_only_diff_on_the_left():
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+        "@@ -5,3 +4,1 @@\n ctx\n-gone\n-also gone\n"
+    )
+    assert core.first_hunk_range(diff) == (6, 7, "LEFT")
+
+
+def test_first_hunk_range_prefers_the_first_hunk_with_added_lines():
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+        "@@ -1,2 +1,1 @@\n ctx\n-removed\n"
+        "@@ -20,1 +19,2 @@\n ctx\n+added\n"
+    )
+    assert core.first_hunk_range(diff) == (20, 20, "RIGHT")
+
+
+def test_first_hunk_range_returns_none_without_hunks():
+    assert core.first_hunk_range("diff --git a/a.png b/a.png\nBinary files differ\n") is None
+    assert core.first_hunk_range("") is None
+
+
+def test_first_hunk_range_ignores_the_diff_header_plus_lines():
+    diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,2 @@\n ctx\n+real\n"
+    assert core.first_hunk_range(diff) == (2, 2, "RIGHT")

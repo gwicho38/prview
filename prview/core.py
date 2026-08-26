@@ -261,6 +261,57 @@ def added_line_numbers(diff_text: str) -> list[int]:
     return added
 
 
+_HUNK_BOTH_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def first_hunk_range(diff_text: str) -> tuple[int, int, str] | None:
+    """The first anchorable line range in a file's unified diff.
+
+    Returns (start, end, side): the added-line span of the first hunk that adds
+    anything, else the removed-line span of the first hunk that removes
+    anything. GitHub review comments must anchor to a line the diff touches, so
+    a diff with no hunks at all (binary, pure rename, mode change) has no
+    anchor and returns None.
+    """
+    fallback: tuple[int, int, str] | None = None
+    old_no = new_no = 0
+    in_hunk = False
+    added: list[int] = []
+    removed: list[int] = []
+
+    def close() -> tuple[int, int, str] | None:
+        nonlocal fallback
+        if added:
+            return (added[0], added[-1], "RIGHT")
+        if removed and fallback is None:
+            fallback = (removed[0], removed[-1], "LEFT")
+        return None
+
+    for line in diff_text.splitlines():
+        m = _HUNK_BOTH_RE.match(line)
+        if m:
+            done = close()
+            if done:
+                return done
+            old_no, new_no = int(m.group(1)), int(m.group(2))
+            in_hunk = True
+            added, removed = [], []
+            continue
+        if not in_hunk or line.startswith(("+++", "---")):
+            continue
+        if line.startswith("+"):
+            added.append(new_no)
+            new_no += 1
+        elif line.startswith("-"):
+            removed.append(old_no)
+            old_no += 1
+        else:
+            old_no += 1
+            new_no += 1
+
+    return close() or fallback
+
+
 # ---------------------------------------------------------------------------
 # Prompt builders (pure)
 # ---------------------------------------------------------------------------

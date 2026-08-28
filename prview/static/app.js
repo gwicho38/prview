@@ -1,6 +1,8 @@
 "use strict";
-/* prview frontend — vanilla JS, no build step, zero external network requests.
- * diff2html is vendored under /static/vendor and exposed as window.Diff2HtmlUI. */
+/* prview frontend — vanilla JS, no build step.
+ * diff2html is vendored under /static/vendor and exposed as window.Diff2HtmlUI.
+ * No external network requests except the opt-in browser AI engine, which
+ * downloads model weights from the MLC CDN (see llm-worker.js). */
 
 // ----------------------------------------------------------------------------
 // Session token: captured from ?token= on load (or sessionStorage on refresh),
@@ -47,6 +49,30 @@ function savedOrder() {
 // Behavior grouping is derived from the PR's commits lazily — it costs one gh call per commit.
 const GROUP_KEY = "prview:group-behaviors";
 
+// AI engine: the local `claude` CLI, or a model running in this browser via WebGPU.
+// The browser engine needs no CLI and sends nothing to a server, but it is a much
+// smaller model and downloads weights on first use.
+const ENGINE_KEY = "prview:ai-engine";
+const BROWSER_MODELS = [
+  ["Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC", "Qwen2.5-Coder 1.5B (~1.1 GB)"],
+  ["Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC", "Qwen2.5-Coder 7B (~4.3 GB)"],
+  ["Llama-3.2-3B-Instruct-q4f16_1-MLC", "Llama 3.2 3B (~1.9 GB)"],
+];
+const MODEL_KEY = "prview:ai-model";
+
+function savedEngine() {
+  try { return localStorage.getItem(ENGINE_KEY) === "browser" ? "browser" : "claude"; }
+  catch { return "claude"; }
+}
+
+function savedModel() {
+  let m = null;
+  try { m = localStorage.getItem(MODEL_KEY); } catch { m = null; }
+  return BROWSER_MODELS.some(([id]) => id === m) ? m : BROWSER_MODELS[0][0];
+}
+
+function browserEngineAvailable() { return !!navigator.gpu; }
+
 function savedGrouped() {
   try { return localStorage.getItem(GROUP_KEY) === "1"; } catch { return false; }
 }
@@ -63,6 +89,7 @@ const State = {
   rw: null,            // repowise prepare state for the current PR (see Repowise)
   standalone: false,   // true when viewing a local repo without a PR
   hideTests: false,    // UI-only: drop test files from the file list + n/p nav
+  engine: "claude",     // AI engine: "claude" (local CLI) or "browser" (WebGPU model)
   grouped: false,       // sidebar groups files under behaviors
   behaviors: null,      // [BehaviorModel] once loaded; null = not fetched
   collapsed: {},        // behavior id -> true; per-PR, not a preference
@@ -427,6 +454,7 @@ function enterReview(data) {
   State.files = data.files;
   State.orders = data.orders || {};
   State.order = savedOrder();
+  State.engine = savedEngine();
   State.grouped = savedGrouped();
   State.behaviors = null;
   State.collapsed = {};
@@ -1512,6 +1540,73 @@ function startAsk(path, question) {
   launchJob(path, "/ai/ask", { ...prKey(), path, question });
 }
 
+// ---- component:browser-engine ----------------------------------------------
+// One worker for the whole session: the model stays resident between requests, so
+// only the first call pays the load. Requests carry an id because a stale run's
+// tokens can still arrive after the user has moved on.
+let _llm = null;
+let _llmSeq = 0;
+const _llmWaiters = new Map();
+
+function llmWorker() {
+  if (_llm) return _llm;
+  _llm = new Worker("/static/llm-worker.js");
+  _llm.onmessage = (e) => {
+    const msg = e.data || {};
+    if (msg.type === "progress") { _llmWaiters.forEach((x) => x.onProgress(msg)); return; }
+    const w = _llmWaiters.get(msg.id);
+    if (!w) return;
+    if (msg.type === "token") w.onToken(msg.text);
+    else if (msg.type === "done") { _llmWaiters.delete(msg.id); w.resolve(msg.text); }
+    else if (msg.type === "cancelled") { _llmWaiters.delete(msg.id); w.resolve(null); }
+    else if (msg.type === "error") { _llmWaiters.delete(msg.id); w.reject(new Error(msg.error)); }
+  };
+  return _llm;
+}
+
+function runBrowserModel(prompt, { onToken, onProgress }) {
+  const id = ++_llmSeq;
+  const done = new Promise((resolve, reject) => {
+    _llmWaiters.set(id, { resolve, reject, onToken, onProgress: onProgress || (() => {}) });
+  });
+  llmWorker().postMessage({ type: "generate", id, model: savedModel(), prompt });
+  return { id, done };
+}
+
+function cancelBrowserModel(id) {
+  if (!_llm) return;
+  _llm.postMessage({ type: "cancel", id });
+  _llmWaiters.delete(id);
+}
+
+// The browser engine asks the server for the prompt the claude path would send,
+// so switching engines cannot silently change what the model is asked.
+const _PROMPT_KIND = { "/ai/summary": "summary", "/ai/explain": "explain", "/ai/ask": "ask" };
+
+async function launchBrowserJob(path, endpoint, body) {
+  const ai = aiFor(path);
+  const kind = _PROMPT_KIND[endpoint];
+  const { prompt } = await api("POST", "/ai/prompt",
+                               { ...prKey(), kind, path, question: body.question });
+  const run = runBrowserModel(prompt, {
+    onToken: (text) => { ai.partial = text; if (isCurrent(path)) renderAiPanel(path); },
+    onProgress: (p) => { ai.loadNote = p.text || ""; if (isCurrent(path)) renderAiPanel(path); },
+  });
+  ai.localRunId = run.id;
+  const text = await run.done;
+  ai.loadNote = "";
+  ai.partial = "";
+  ai.localRunId = null;
+  if (text === null) return;   // cancelled — cancelJob already reset the panel
+  ai.status = "done";
+  ai.elapsed = Math.floor((Date.now() - ai.t0) / 1000);
+  if (ai.runningMode === "ask") ai.asks.push({ q: ai.question, a: text });
+  else ai.results[ai.runningMode] = text;
+  persistAi(path);
+  if (isCurrent(path)) renderAiPanel(path);
+  announce("AI response ready");
+}
+
 async function launchJob(path, endpoint, body) {
   const ai = aiFor(path);
   ai.status = "running";
@@ -1520,6 +1615,10 @@ async function launchJob(path, endpoint, body) {
   ai.t0 = Date.now();
   if (isCurrent(path)) renderAiPanel(path);
   try {
+    if (State.engine === "browser" && _PROMPT_KIND[endpoint]) {
+      await launchBrowserJob(path, endpoint, body);
+      return;
+    }
     const { job_id } = await api("POST", endpoint, body);
     ai.jobId = job_id;
     pollJob(path);
@@ -1583,8 +1682,17 @@ async function cancelJob(path) {
   // Return to a resting state showing whatever is already cached.
   ai.status = (ai.results.summary || ai.results.explain || ai.asks.length) ? "done" : "idle";
   ai.mode = ai.prevMode || "summary";
+  ai.partial = "";
+  ai.loadNote = "";
+  if (ai.localRunId) { cancelBrowserModel(ai.localRunId); ai.localRunId = null; }
   if (isCurrent(path)) renderAiPanel(path);
   if (jobId) { try { await api("POST", `/job/${jobId}/cancel`); } catch { /* best-effort */ } }
+}
+
+function setEngine(value, path) {
+  State.engine = value === "browser" ? "browser" : "claude";
+  try { localStorage.setItem(ENGINE_KEY, State.engine); } catch { /* best-effort */ }
+  renderAiPanel(path);
 }
 
 function retryAi(path) {
@@ -1657,13 +1765,53 @@ function renderAiPanel(path) {
     });
     head.appendChild(refresh);
   }
+  const engine = document.createElement("select");
+  engine.className = "ai-engine-select";
+  engine.title = browserEngineAvailable()
+    ? "Which model answers: the local claude CLI, or a model running in this browser"
+    : "This browser has no WebGPU, so the in-browser engine is unavailable";
+  engine.setAttribute("aria-label", "AI engine");
+  engine.disabled = !browserEngineAvailable() || ai.status === "running";
+  [["claude", "claude (local)"], ["browser", "in-browser"]].forEach(([value, label]) => {
+    const opt = document.createElement("option");
+    opt.value = value; opt.textContent = label;
+    opt.selected = value === State.engine;
+    engine.appendChild(opt);
+  });
+  engine.addEventListener("change", () => setEngine(engine.value, path));
+  head.appendChild(engine);
+
+  if (State.engine === "browser" && browserEngineAvailable()) {
+    const model = document.createElement("select");
+    model.className = "ai-engine-select";
+    model.title = "Weights download once from the MLC CDN, then stay in this browser's cache";
+    model.setAttribute("aria-label", "Browser model");
+    model.disabled = ai.status === "running";
+    BROWSER_MODELS.forEach(([id, label]) => {
+      const opt = document.createElement("option");
+      opt.value = id; opt.textContent = label;
+      opt.selected = id === savedModel();
+      model.appendChild(opt);
+    });
+    model.addEventListener("change", () => {
+      try { localStorage.setItem(MODEL_KEY, model.value); } catch { /* best-effort */ }
+      renderAiPanel(path);
+    });
+    head.appendChild(model);
+  }
   el.appendChild(head);
 
   // State A — loading
   if (ai.status === "running") {
     const loading = document.createElement("div");
     loading.className = "ai-loading";
-    loading.innerHTML = `<span class="spinner"></span> Analyzing diff… (job submitted, polling · ${elapsedStr(path)} elapsed)`;
+    const localRun = State.engine === "browser" && ai.localRunId;
+    const note = localRun
+      ? (ai.loadNote ? `Loading model — ${ai.loadNote}` : "Generating in this browser")
+      : "Analyzing diff… (job submitted, polling";
+    loading.innerHTML = localRun
+      ? `<span class="spinner"></span> ${escapeHtml(note)} · ${elapsedStr(path)} elapsed`
+      : `<span class="spinner"></span> ${note} · ${elapsedStr(path)} elapsed)`;
     const progRow = document.createElement("div");
     progRow.className = "ai-loading";
     progRow.style.marginTop = "8px";
@@ -1671,6 +1819,12 @@ function renderAiPanel(path) {
     el.append(loading, progRow);
     // Summary has its own ■ Stop in the header; explain/ask still get a
     // body-level Cancel since they have no header stop control.
+    if (ai.partial) {
+      const live = document.createElement("div");
+      live.className = "ai-md";
+      live.textContent = ai.partial;
+      el.appendChild(live);
+    }
     if (ai.runningMode !== "summary") {
       const cancel = document.createElement("button");
       cancel.className = "btn";

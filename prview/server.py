@@ -67,6 +67,8 @@ from prview.api_models import (
     PRInfoModel,
     PRRefRequest,
     PRResponse,
+    PromptRequest,
+    PromptResponse,
     PRTarget,
     RepoPathRequest,
     RepoPathResponse,
@@ -318,6 +320,36 @@ async def ai_ask(req: AskRequest) -> JobIdResponse:
 async def ai_explain_selection(req: ExplainSelectionRequest) -> JobIdResponse:
     pr, fd = _cached_file(req.owner, req.repo, req.number, req.path)
     return JobIdResponse(job_id=jobs.start_explain_selection(pr, fd, req.selection))
+
+
+# The browser-side model engine builds nothing itself: it asks for the very prompt
+# the claude path would send, so both engines stay one implementation.
+_FILE_PROMPTS = {
+    "summary": lambda pr, fd, req: core.build_summary_prompt(pr, fd),
+    "explain": lambda pr, fd, req: core.build_explain_prompt(pr, fd),
+    "ask": lambda pr, fd, req: core.build_ask_prompt(pr, fd, req.question),
+    "explain-selection": lambda pr, fd, req: core.build_explain_selection_prompt(
+        pr, fd, req.selection),
+}
+_PROMPT_REQUIRED = {"ask": "question", "explain-selection": "selection"}
+
+
+@app.post("/ai/prompt", response_model=PromptResponse)
+def post_ai_prompt(req: PromptRequest) -> PromptResponse:
+    if req.kind == "overview":
+        entry = _cached(req.owner, req.repo, req.number)
+        return PromptResponse(prompt=core.build_overview_prompt(entry["pr"], entry["files"]))
+    build = _FILE_PROMPTS.get(req.kind)
+    if build is None:
+        raise _err(400, f"Unknown prompt kind: {req.kind}",
+                   f"expected one of: overview, {', '.join(sorted(_FILE_PROMPTS))}")
+    if not req.path:
+        raise _err(400, f"Prompt kind {req.kind} needs a file path")
+    missing = _PROMPT_REQUIRED.get(req.kind)
+    if missing and not getattr(req, missing):
+        raise _err(400, f"Prompt kind {req.kind} needs a {missing}")
+    pr, fd = _cached_file(req.owner, req.repo, req.number, req.path)
+    return PromptResponse(prompt=build(pr, fd, req))
 
 
 @app.get("/job/{job_id}", response_model=JobStatusResponse)

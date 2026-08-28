@@ -222,6 +222,22 @@ class BehaviorsResponse(BaseModel):
     groupable: bool
 
 
+class PromptRequest(PRTarget):
+    kind: str
+    path: str | None = None
+    question: str | None = None
+    selection: str | None = None
+
+    @field_validator("path")
+    @classmethod
+    def _v_path(cls, v):
+        return None if v is None else _check_path(v)
+
+
+class PromptResponse(BaseModel):
+    prompt: str
+
+
 class JobIdResponse(BaseModel):
     job_id: str
 

@@ -705,3 +705,56 @@ def test_concurrent_first_requests_derive_the_grouping_once(client, monkeypatch)
         t.join()
     assert sorted(calls) == ["s1", "s2"], f"derived more than once: {calls}"
     assert len({id(r[0]) for r in results}) == 1, "every caller must get the same derived list"
+
+
+def test_ai_prompt_returns_the_same_prompt_the_claude_path_would_use(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    resp = client.post("/ai/prompt", json={
+        "owner": "octo", "repo": "hello", "number": 7, "kind": "summary", "path": "big.py"})
+    assert resp.status_code == 200
+    pr, fd = server._cached_file("octo", "hello", 7, "big.py")
+    assert resp.json()["prompt"] == core.build_summary_prompt(pr, fd)
+
+
+def test_ai_prompt_covers_every_per_file_kind(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    pr, fd = server._cached_file("octo", "hello", 7, "big.py")
+    cases = {
+        "explain": core.build_explain_prompt(pr, fd),
+        "ask": core.build_ask_prompt(pr, fd, "why?"),
+        "explain-selection": core.build_explain_selection_prompt(pr, fd, "x = 1"),
+    }
+    for kind, expected in cases.items():
+        body = {"owner": "octo", "repo": "hello", "number": 7, "kind": kind, "path": "big.py",
+                "question": "why?", "selection": "x = 1"}
+        assert client.post("/ai/prompt", json=body).json()["prompt"] == expected, kind
+
+
+def test_ai_prompt_builds_the_whole_pr_overview_without_a_path(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    entry = server._cached("octo", "hello", 7)
+    resp = client.post("/ai/prompt", json={
+        "owner": "octo", "repo": "hello", "number": 7, "kind": "overview"})
+    assert resp.status_code == 200
+    assert resp.json()["prompt"] == core.build_overview_prompt(entry["pr"], entry["files"])
+
+
+def test_ai_prompt_rejects_an_unknown_kind(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    resp = client.post("/ai/prompt", json={
+        "owner": "octo", "repo": "hello", "number": 7, "kind": "nonsense", "path": "big.py"})
+    assert resp.status_code == 400
+
+
+def test_ai_prompt_requires_a_path_for_per_file_kinds(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    resp = client.post("/ai/prompt", json={
+        "owner": "octo", "repo": "hello", "number": 7, "kind": "summary"})
+    assert resp.status_code == 400
+
+
+def test_ai_prompt_requires_a_question_for_ask(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    resp = client.post("/ai/prompt", json={
+        "owner": "octo", "repo": "hello", "number": 7, "kind": "ask", "path": "big.py"})
+    assert resp.status_code == 400

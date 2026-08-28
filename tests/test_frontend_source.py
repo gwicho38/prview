@@ -190,3 +190,29 @@ def test_both_comment_scopes_share_one_composer():
         body = body[:body.index("\n}\n")]
         assert "openCommentComposer({" in body, fn
         assert "createElement(\"textarea\")" not in body, fn
+
+
+def test_browser_engine_is_opt_in_and_persisted():
+    assert 'const ENGINE_KEY = "prview:ai-engine";' in APP_JS
+    assert 'localStorage.getItem(ENGINE_KEY) === "browser" ? "browser" : "claude"' in APP_JS
+    assert "function browserEngineAvailable() { return !!navigator.gpu; }" in APP_JS
+
+
+def test_browser_engine_reuses_the_servers_prompt_builders():
+    # Both engines must ask the model the same thing; a second prompt copy in JS
+    # is the drift this endpoint exists to prevent.
+    body = APP_JS[APP_JS.index("async function launchBrowserJob("):]
+    body = body[:body.index("\n}\n")]
+    assert 'api("POST", "/ai/prompt"' in body
+    assert "build_summary_prompt" not in APP_JS
+
+
+def test_browser_generation_runs_in_a_worker_not_the_main_thread():
+    assert 'new Worker("/static/llm-worker.js")' in APP_JS
+    assert "import(WEBLLM)" not in APP_JS, "the model must be imported in the worker, not app.js"
+
+
+def test_cancel_reaches_the_browser_engine_too():
+    body = APP_JS[APP_JS.index("async function cancelJob(path)"):]
+    body = body[:body.index("\n}\n")]
+    assert "cancelBrowserModel(ai.localRunId)" in body

@@ -182,3 +182,31 @@ def test_merging_keeps_an_also_in_count_for_a_toucher_outside_the_merge():
     ]
     got = behaviors.apply_behavior_names(derived, "b1+b2 -> Orders end to end\nb3 -> Lint")
     assert got[0].also_in == {"model.py": 1}
+
+
+def test_also_in_is_capped_by_behaviors_that_survive_the_merge_not_raw_positions():
+    # b2..b5 collapse into one output behavior, so only ONE other behavior can touch f.py.
+    derived = [
+        behaviors.Behavior("b1", "one", ("a",), ("f.py",), {"f.py": 3}),
+        behaviors.Behavior("b2", "two", ("b",), ("g.py",)),
+        behaviors.Behavior("b3", "three", ("c",), ("h.py",)),
+        behaviors.Behavior("b4", "four", ("d",), ("i.py",)),
+        behaviors.Behavior("b5", "five", ("e",), ("j.py",)),
+    ]
+    got = behaviors.apply_behavior_names(derived, "b1 -> Keep\nb2+b3+b4+b5 -> Fold")
+    assert got[0].also_in == {"f.py": 1}
+
+
+def test_also_in_drops_entirely_when_no_behavior_survives_after_the_group():
+    derived = [
+        behaviors.Behavior("b1", "one", ("a",), ("f.py",), {"f.py": 1}),
+        behaviors.Behavior("b2", "two", ("b",), ("g.py",)),
+    ]
+    got = behaviors.apply_behavior_names(derived, "b1+b2 -> All one thing")
+    assert got[0].also_in == {}
+
+
+def test_a_zero_width_only_title_is_rejected_as_empty():
+    derived = [behaviors.Behavior("b1", "one", ("a",), ("f.py",))]
+    for blank in ("\u200b", "\u200c\u200d", "\ufeff", "\u2060"):
+        assert behaviors.apply_behavior_names(derived, f"b1 -> {blank}") is None, repr(blank)

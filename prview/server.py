@@ -18,6 +18,8 @@ holding the per-PR lock for the whole read-modify-write before returning.
 Errors: GhError / parse errors / cache misses map to structured {error, hint?}
 JSON via HTTPException(detail=...) — never a leaked stack trace.
 """
+import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -178,16 +180,51 @@ def get_pr(owner: str, repo: str, n: int) -> PRResponse:
 
 
 # Grouping costs N+1 gh calls, so it's computed on first use and kept until the head SHA moves.
-_BEHAVIOR_CACHE: dict[tuple[str, str, int, str], tuple[list, bool]] = {}
+_BEHAVIOR_CACHE: "OrderedDict[tuple[str, str, int, str], tuple[list, bool]]" = OrderedDict()
+_BEHAVIOR_CACHE_CAP = 32
+_BEHAVIOR_CACHE_LOCK = threading.Lock()
+_BEHAVIOR_DERIVE_LOCKS: dict[tuple[str, str, int, str], threading.Lock] = {}
+
+
+def _behavior_cache_get(key):
+    with _BEHAVIOR_CACHE_LOCK:
+        hit = _BEHAVIOR_CACHE.get(key)
+        if hit is not None:
+            _BEHAVIOR_CACHE.move_to_end(key)
+        return hit
+
+
+def _behavior_cache_put(key, value) -> None:
+    with _BEHAVIOR_CACHE_LOCK:
+        _BEHAVIOR_CACHE[key] = value
+        _BEHAVIOR_CACHE.move_to_end(key)
+        while len(_BEHAVIOR_CACHE) > _BEHAVIOR_CACHE_CAP:
+            evicted, _ = _BEHAVIOR_CACHE.popitem(last=False)
+            _BEHAVIOR_DERIVE_LOCKS.pop(evicted, None)
+
+
+def _behavior_derive_lock(key) -> threading.Lock:
+    with _BEHAVIOR_CACHE_LOCK:
+        return _BEHAVIOR_DERIVE_LOCKS.setdefault(key, threading.Lock())
 
 
 def _behaviors_for(owner: str, repo: str, number: int) -> tuple[list, str, bool]:
     entry = _cached(owner, repo, number)
     pr, files = entry["pr"], entry["files"]
     key = (owner, repo, number, pr.head_sha)
-    if key in _BEHAVIOR_CACHE:
-        derived, groupable = _BEHAVIOR_CACHE[key]
-        return derived, pr.head_sha, groupable
+    hit = _behavior_cache_get(key)
+    if hit is not None:
+        return hit[0], pr.head_sha, hit[1]
+    # One derivation per key: FastAPI runs sync endpoints on a thread pool, and
+    # concurrent first-requests would otherwise each pay the N+1 gh calls.
+    with _behavior_derive_lock(key):
+        hit = _behavior_cache_get(key)
+        if hit is not None:
+            return hit[0], pr.head_sha, hit[1]
+        return _derive_behaviors(owner, repo, number, pr, files, key)
+
+
+def _derive_behaviors(owner, repo, number, pr, files, key) -> tuple[list, str, bool]:
     try:
         commits = gh.fetch_pr_commits(owner, repo, number)
     except gh.GhError as e:
@@ -204,7 +241,7 @@ def _behaviors_for(owner: str, repo: str, number: int) -> tuple[list, str, bool]
         raise _err(409, str(e), getattr(e, "hint", None))
     derived = behaviors.behaviors_from_commits(
         commits, files_by_sha, {f.filename for f in files})
-    _BEHAVIOR_CACHE[key] = (derived, groupable)
+    _behavior_cache_put(key, (derived, groupable))
     return derived, pr.head_sha, groupable
 
 
@@ -227,7 +264,7 @@ def post_ai_behavior_names(req: PRTarget) -> JobIdResponse:
     def apply(result: str):
         named = behaviors.apply_behavior_names(derived, result)
         if named:
-            _BEHAVIOR_CACHE[key] = (named, groupable)
+            _behavior_cache_put(key, (named, groupable))
 
     return JobIdResponse(
         job_id=jobs.start_behavior_names(entry["pr"], derived, on_done=apply))

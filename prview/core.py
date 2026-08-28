@@ -228,7 +228,7 @@ def parse_diff(raw: str) -> list[FileDiff]:
     return files
 
 
-_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 def added_line_numbers(diff_text: str) -> list[int]:
@@ -236,7 +236,7 @@ def added_line_numbers(diff_text: str) -> list[int]:
 
     Walks each hunk from its `+start` header: context and added lines advance
     the new-side counter, removed lines do not. Lets the whole-file view
-    highlight exactly the lines this diff added. Diff headers (`+++`) are skipped.
+    highlight exactly the lines this diff added.
     """
     added: list[int] = []
     new_no = 0
@@ -244,7 +244,7 @@ def added_line_numbers(diff_text: str) -> list[int]:
     for line in diff_text.splitlines():
         m = _HUNK_RE.match(line)
         if m:
-            new_no = int(m.group(1))
+            new_no = int(m.group(2))
             in_hunk = True
             continue
         if not in_hunk:
@@ -257,9 +257,6 @@ def added_line_numbers(diff_text: str) -> list[int]:
         else:
             new_no += 1  # context (or "\ No newline" markers, harmless)
     return added
-
-
-_HUNK_BOTH_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 def first_hunk_range(diff_text: str) -> tuple[int, int, str] | None:
@@ -286,7 +283,7 @@ def first_hunk_range(diff_text: str) -> tuple[int, int, str] | None:
         return None
 
     for line in diff_text.splitlines():
-        m = _HUNK_BOTH_RE.match(line)
+        m = _HUNK_RE.match(line)
         if m:
             done = close()
             if done:

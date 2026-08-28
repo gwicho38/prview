@@ -1,6 +1,8 @@
 """API endpoint tests. gh/jobs are mocked at the prview.gh / prview.jobs
 boundary — never a real subprocess. The security middleware is satisfied with
 a valid token + a localhost Host header via the `client` fixture."""
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,6 +23,7 @@ def client(tmp_path, monkeypatch):
     state_store.reset_locks()
     server.cache._store.clear()
     server._BEHAVIOR_CACHE.clear()
+    server._BEHAVIOR_DERIVE_LOCKS.clear()
     server.set_session_token(TOKEN)
     c = TestClient(server.app)
     c.headers.update({"X-Prview-Token": TOKEN, "Host": "127.0.0.1"})
@@ -656,3 +659,49 @@ def test_behavior_comment_increments_the_review_comment_count(client, monkeypatc
         "behavior_id": "b1", "text": "counted",
     })
     assert client.get("/state/octo/hello/7").json()["comments"] == 1
+
+
+def test_behavior_cache_evicts_the_oldest_entry_past_its_cap(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    _wire_commits(monkeypatch)
+    client.get("/pr/octo/hello/7/behaviors")
+    real_key = next(iter(server._BEHAVIOR_CACHE))
+    for n in range(server._BEHAVIOR_CACHE_CAP):
+        server._behavior_cache_put(("filler", "repo", n, "sha"), ([], True))
+    assert len(server._BEHAVIOR_CACHE) == server._BEHAVIOR_CACHE_CAP
+    assert real_key not in server._BEHAVIOR_CACHE, "oldest entry must be evicted, not the newest"
+    assert ("filler", "repo", server._BEHAVIOR_CACHE_CAP - 1, "sha") in server._BEHAVIOR_CACHE
+
+
+def test_behavior_cache_reads_refresh_recency(client):
+    a, b = ("o", "r", 1, "sha"), ("o", "r", 2, "sha")
+    server._behavior_cache_put(a, ([], True))
+    server._behavior_cache_put(b, ([], True))
+    server._behavior_cache_get(a)
+    for n in range(server._BEHAVIOR_CACHE_CAP - 1):
+        server._behavior_cache_put(("f", "r", n, "s"), ([], True))
+    assert a in server._BEHAVIOR_CACHE, "a was read most recently and must outlive b"
+    assert b not in server._BEHAVIOR_CACHE
+
+
+def test_concurrent_first_requests_derive_the_grouping_once(client, monkeypatch):
+    import threading
+    _load_pr(client, monkeypatch)
+    calls = []
+    monkeypatch.setattr(gh, "fetch_pr_commits", lambda o, r, n: _fake_commits())
+
+    def slow_files(o, r, sha):
+        calls.append(sha)
+        time.sleep(0.05)
+        return {"s1": ["big.py"], "s2": ["small.py"]}[sha]
+
+    monkeypatch.setattr(gh, "fetch_commit_files", slow_files)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(
+        server._behaviors_for("octo", "hello", 7))) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(calls) == ["s1", "s2"], f"derived more than once: {calls}"
+    assert len({id(r[0]) for r in results}) == 1, "every caller must get the same derived list"

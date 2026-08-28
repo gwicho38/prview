@@ -1915,6 +1915,52 @@ function trapFocus(modal) {
 
 function modalIsOpen() { return !document.getElementById("modal-root").hidden; }
 
+// ---- component:comment-composer -------------------------------------------
+// One composer for both comment scopes; `submit` owns the POST and its
+// bookkeeping and returns {message, after} for the shared success path.
+function openCommentComposer({ title, label, placeholder, textareaId, autofocus, submit }) {
+  openModal({
+    title,
+    render: (modal, body) => {
+      body.className = "modal-body";
+      const lbl = document.createElement("label");
+      lbl.textContent = label;
+      const ta = document.createElement("textarea");
+      ta.className = "textarea";
+      if (textareaId) ta.id = textareaId;
+      ta.placeholder = placeholder;
+      body.append(lbl, ta);
+
+      const foot = document.createElement("div");
+      foot.className = "modal-foot";
+      const cancel = document.createElement("button");
+      cancel.className = "btn"; cancel.textContent = "Cancel";
+      cancel.addEventListener("click", closeModal);
+      const post = document.createElement("button");
+      post.className = "btn btn-primary"; post.textContent = "Post comment";
+      post.addEventListener("click", async () => {
+        const text = ta.value.trim();
+        if (!text) { ta.focus(); return; }
+        post.disabled = true; cancel.disabled = true;
+        post.innerHTML = '<span class="spinner spinner-sm"></span> Posting…';
+        try {
+          const done = await submit(text);
+          closeModal();
+          if (done && done.after) done.after();
+          toast((done && done.message) || "Comment posted");
+        } catch (e) {
+          post.disabled = false; cancel.disabled = false;
+          post.textContent = "Post comment";
+          toast(e.message || "comment failed", "error");
+        }
+      });
+      foot.append(cancel, post);
+      modal.appendChild(foot);
+      if (autofocus) ta.focus();
+    },
+  });
+}
+
 // ---- component:comment-modal ----------------------------------------------
 function openCommentModal() {
   const f = currentFile();
@@ -1924,111 +1970,53 @@ function openCommentModal() {
   const anchor = range
     ? (range.start !== range.end ? `lines ${range.start}–${range.end}` : `line ${range.end}`)
     : null;
-  openModal({
+  openCommentComposer({
     title: anchor ? `Comment on  ${f.filename} · ${anchor}` : `Comment on  ${f.filename}`,
-    render: (modal, body) => {
-      body.className = "modal-body";
-      const lbl = document.createElement("label");
-      lbl.textContent = anchor ? `Comment (anchored to ${anchor})` : "Comment";
-      const ta = document.createElement("textarea");
-      ta.className = "textarea";
-      ta.id = "comment-text";
-      ta.placeholder = anchor
-        ? `Add a review comment on ${anchor}…`
-        : "Add a comment scoped to this file (select code first to anchor it)…";
-      body.append(lbl, ta);
-
-      const foot = document.createElement("div");
-      foot.className = "modal-foot";
-      const cancel = document.createElement("button");
-      cancel.className = "btn"; cancel.textContent = "Cancel";
-      cancel.addEventListener("click", closeModal);
-      const post = document.createElement("button");
-      post.className = "btn btn-primary"; post.textContent = "Post comment";
-      post.addEventListener("click", async () => {
-        const text = ta.value.trim();
-        if (!text) { ta.focus(); return; }
-        post.disabled = true; cancel.disabled = true;
-        post.innerHTML = '<span class="spinner spinner-sm"></span> Posting…';
-        try {
-          const payload = { ...prKey(), path: f.filename, text };
-          if (range) {
-            payload.line = range.end;
-            payload.side = "RIGHT";
-            if (range.start !== range.end) payload.start_line = range.start;
-          }
-          const res = await api("POST", "/comment", payload);
-          if (res && res.ok) {
-            State.review.comments = (State.review.comments || 0) + 1;
-            const entry = {
-              text,
-              line: range ? range.end : null,
-              start_line: range && range.start !== range.end ? range.start : null,
-            };
-            const threads = State.review.comment_threads || (State.review.comment_threads = {});
-            threads[f.filename] = [...(threads[f.filename] || []), entry];
-            f.comments = [...(f.comments || []), entry];
-            closeModal();
-            renderFileDetail();
-            toast(range ? "Review comment posted" : "Comment posted");
-          } else {
-            throw new Error((res && res.error) || "comment failed");
-          }
-        } catch (e) {
-          post.disabled = false; cancel.disabled = false;
-          post.textContent = "Post comment";
-          toast(e.message, "error");
-        }
-      });
-      foot.append(cancel, post);
-      modal.appendChild(foot);
+    label: anchor ? `Comment (anchored to ${anchor})` : "Comment",
+    placeholder: anchor
+      ? `Add a review comment on ${anchor}…`
+      : "Add a comment scoped to this file (select code first to anchor it)…",
+    textareaId: "comment-text",
+    submit: async (text) => {
+      const payload = { ...prKey(), path: f.filename, text };
+      if (range) {
+        payload.line = range.end;
+        payload.side = "RIGHT";
+        if (range.start !== range.end) payload.start_line = range.start;
+      }
+      const res = await api("POST", "/comment", payload);
+      if (!res || !res.ok) throw new Error((res && res.error) || "comment failed");
+      State.review.comments = (State.review.comments || 0) + 1;
+      const entry = {
+        text,
+        line: range ? range.end : null,
+        start_line: range && range.start !== range.end ? range.start : null,
+      };
+      const threads = State.review.comment_threads || (State.review.comment_threads = {});
+      threads[f.filename] = [...(threads[f.filename] || []), entry];
+      f.comments = [...(f.comments || []), entry];
+      return { after: renderFileDetail, message: range ? "Review comment posted" : "Comment posted" };
     },
   });
 }
 
 // ---- component:behavior-comment-modal --------------------------------------
 function openBehaviorCommentModal(b) {
-  openModal({
+  openCommentComposer({
     title: `Comment on behavior  ${b.title}`,
-    render: (modal, body) => {
-      body.className = "modal-body";
-      const lbl = document.createElement("label");
-      lbl.textContent = `Comment (${b.filenames.length} files: ${b.filenames.join(", ")})`;
-      const ta = document.createElement("textarea");
-      ta.className = "textarea";
-      ta.placeholder = "What about this behavior needs discussing?";
-      body.append(lbl, ta);
-
-      const foot = document.createElement("div");
-      foot.className = "modal-foot";
-      const cancel = document.createElement("button");
-      cancel.className = "btn"; cancel.textContent = "Cancel";
-      cancel.addEventListener("click", closeModal);
-      const post = document.createElement("button");
-      post.className = "btn btn-primary"; post.textContent = "Post comment";
-      post.addEventListener("click", async () => {
-        const text = ta.value.trim();
-        if (!text) { ta.focus(); return; }
-        post.disabled = true; cancel.disabled = true;
-        post.innerHTML = '<span class="spinner spinner-sm"></span> Posting…';
-        try {
-          const res = await api("POST", "/behaviors/comment",
-                                { ...prKey(), behavior_id: b.id, text });
-          if (!res || !res.ok) throw new Error((res && res.error) || "comment failed");
-          State.review.comments = (State.review.comments || 0) + 1;
-          closeModal();
-          renderFileList();
-          toast(res.anchored ? `Comment posted on ${res.path}:${res.line}`
-                             : "Comment posted (no anchorable hunk — posted at PR level)");
-        } catch (e) {
-          post.disabled = false; cancel.disabled = false;
-          post.textContent = "Post comment";
-          toast(e.message || "comment failed", "error");
-        }
-      });
-      foot.append(cancel, post);
-      modal.appendChild(foot);
-      ta.focus();
+    label: `Comment (${b.filenames.length} files: ${b.filenames.join(", ")})`,
+    placeholder: "What about this behavior needs discussing?",
+    autofocus: true,
+    submit: async (text) => {
+      const res = await api("POST", "/behaviors/comment",
+                            { ...prKey(), behavior_id: b.id, text });
+      if (!res || !res.ok) throw new Error((res && res.error) || "comment failed");
+      State.review.comments = (State.review.comments || 0) + 1;
+      return {
+        after: renderFileList,
+        message: res.anchored ? `Comment posted on ${res.path}:${res.line}`
+                              : "Comment posted (no anchorable hunk — posted at PR level)",
+      };
     },
   });
 }

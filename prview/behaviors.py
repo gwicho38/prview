@@ -76,6 +76,13 @@ _NAME_LINE_RE = re.compile(
 
 _TITLE_CAP = 120
 
+# Zero-width characters strip() leaves behind; a title of only these renders blank.
+_ZERO_WIDTH = "\u200b\u200c\u200d\u2060\ufeff"
+
+
+def _is_blank(title: str) -> bool:
+    return not title.strip(_ZERO_WIDTH).strip()
+
 
 def _capped_title(title: str) -> str:
     return title if len(title) <= _TITLE_CAP else title[: _TITLE_CAP - 1].rstrip() + "…"
@@ -99,7 +106,7 @@ def apply_behavior_names(derived: list[Behavior], reply: str) -> list[Behavior] 
             continue
         ids = [i.strip().lower() for i in m.group(1).split("+")]
         title = m.group(2).strip()
-        if not title or any(i not in index for i in ids):
+        if _is_blank(title) or any(i not in index for i in ids):
             return None
         positions = [index[i] for i in ids]
         if positions != list(range(positions[0], positions[0] + len(positions))):
@@ -114,9 +121,9 @@ def apply_behavior_names(derived: list[Behavior], reply: str) -> list[Behavior] 
     out: list[Behavior] = []
     for n, (positions, title, noise) in enumerate(groups, start=1):
         members = [derived[p] for p in positions]
-        # A count can only name behaviors past this group's last merged position —
-        # anything earlier just got folded into this same group and is no longer "other".
-        external_capacity = len(derived) - 1 - positions[-1]
+        # Only behaviors that survive the merge past this group can still be "other" —
+        # counting raw positions overstates the badge when later groups collapse.
+        external_capacity = len(groups) - n
         merged_also: dict[str, int] = {}
         for b in members:
             for filename, count in b.also_in.items():

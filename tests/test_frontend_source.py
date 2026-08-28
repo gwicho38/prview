@@ -180,3 +180,13 @@ def test_group_toggle_label_reflects_active_grouping_not_the_preference_alone():
     assert "groupingActive()" in toggle
     assert "State.grouped ?" not in toggle
     assert "String(State.grouped)" not in toggle
+
+
+def test_both_comment_scopes_share_one_composer():
+    # Two near-identical modals drifted apart once; one composer is the fix.
+    assert "function openCommentComposer(" in APP_JS
+    for fn in ("function openCommentModal()", "function openBehaviorCommentModal(b)"):
+        body = APP_JS[APP_JS.index(fn):]
+        body = body[:body.index("\n}\n")]
+        assert "openCommentComposer({" in body, fn
+        assert "createElement(\"textarea\")" not in body, fn

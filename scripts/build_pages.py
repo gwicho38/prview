@@ -7,6 +7,7 @@ behavior derivation and prompt building have one implementation and one test sui
 A third-party import in those modules would break in Pyodide, which has no install
 step, so `assert_stdlib_only` fails the build here rather than in someone's browser.
 """
+import hashlib
 import re
 import shutil
 import sys
@@ -77,8 +78,17 @@ def assert_stdlib_only(sources: dict[str, str]) -> None:
         )
 
 
-def rewrite_index(html: str) -> str:
-    """Point the shell at same-directory assets and boot the serverless transport."""
+def _stamp(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
+
+
+def rewrite_index(html: str, stamps: dict[str, str] | None = None) -> str:
+    """Point the shell at same-directory assets and boot the serverless transport.
+
+    Asset URLs carry a content stamp. Without it a returning visitor keeps a cached
+    app.js while getting the new index.html, and the two disagree about what exists.
+    """
+    stamps = stamps or {}
     html = html.replace('href="/static/', 'href="./').replace('src="/static/', 'src="./')
     html = html.replace(
         "<title>prview</title>",
@@ -94,7 +104,11 @@ def rewrite_index(html: str) -> str:
     html = html.replace(tag, "")
     if "</body>" not in html:
         raise SystemExit("index.html has no </body> to bootstrap into")
-    return html.replace("</body>", _BOOTSTRAP + "</body>")
+    bootstrap = _BOOTSTRAP
+    for name, stamp in stamps.items():
+        bootstrap = bootstrap.replace(f'"./{name}"', f'"./{name}?v={stamp}"')
+        html = html.replace(f'"./{name}"', f'"./{name}?v={stamp}"')
+    return html.replace("</body>", bootstrap + "</body>")
 
 
 def build(root: Path = ROOT) -> Path:
@@ -109,7 +123,11 @@ def build(root: Path = ROOT) -> Path:
     for name in COPIED_ASSETS:
         shutil.copy2(static / name, pages / name)
     shutil.copytree(static / "vendor", pages / "vendor", dirs_exist_ok=True)
-    (pages / "index.html").write_text(rewrite_index((static / "index.html").read_text()))
+    stamped = {name: _stamp((pages / name).read_text())
+               for name in (*COPIED_ASSETS, "adapter.js", "styles.css")
+               if (pages / name).is_file()}
+    (pages / "index.html").write_text(
+        rewrite_index((static / "index.html").read_text(), stamped))
     (pages / ".nojekyll").write_text("")
     return pages
 

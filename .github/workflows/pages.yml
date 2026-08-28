@@ -51,6 +51,9 @@ jobs:
           fi
           test "$(grep -c 'app.js' pages/index.html)" = "1" \
             || { echo "::error::app.js must be referenced exactly once (the bootstrap injects it)"; exit 1; }
+          # Without a stamp, a returning visitor runs a cached app.js against a new shell.
+          grep -qE 'app\.js\?v=[0-9a-f]{8}' pages/index.html \
+            || { echo "::error::asset URLs are missing their content stamp"; exit 1; }
 
       - uses: actions/configure-pages@v5
 

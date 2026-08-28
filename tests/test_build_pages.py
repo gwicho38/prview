@@ -1,6 +1,8 @@
 """Hosted-build tests. The staging step is the only thing standing between a
 non-stdlib import and a page that breaks in someone's browser, so it is tested
 like production code."""
+import re
+
 import pytest
 
 import scripts.build_pages as bp
@@ -69,3 +71,23 @@ def test_hosted_build_reviews_with_the_browser_model_by_default():
     html = bp.rewrite_index(_real_shell())
     assert 'window.__prviewDefaultEngine = "browser"' in html
     assert "window.__prviewNoClaude = true" in html
+
+
+def test_asset_urls_carry_a_content_stamp(tmp_path):
+    import shutil
+    shutil.copytree(bp.ROOT / "prview", tmp_path / "prview",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(bp.ROOT / "pages" / "adapter.js", tmp_path / "adapter-src.js")
+    (tmp_path / "pages").mkdir(exist_ok=True)
+    shutil.copy2(bp.ROOT / "pages" / "adapter.js", tmp_path / "pages" / "adapter.js")
+    html = (bp.build(tmp_path) / "index.html").read_text()
+    # A returning visitor otherwise runs a cached app.js against a new index.html.
+    assert re.search(r'app\.js\?v=[0-9a-f]{8}', html), html[-600:]
+    assert re.search(r'styles\.css\?v=[0-9a-f]{8}', html)
+    assert re.search(r'llm-worker\.js\?v=[0-9a-f]{8}', html)
+    assert re.search(r'adapter\.js\?v=[0-9a-f]{8}', html)
+
+
+def test_the_stamp_changes_when_the_asset_changes():
+    assert bp._stamp("one") != bp._stamp("two")
+    assert bp._stamp("same") == bp._stamp("same")

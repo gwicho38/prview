@@ -194,8 +194,19 @@ def test_both_comment_scopes_share_one_composer():
 
 def test_browser_engine_is_opt_in_and_persisted():
     assert 'const ENGINE_KEY = "prview:ai-engine";' in APP_JS
-    assert 'localStorage.getItem(ENGINE_KEY) === "browser" ? "browser" : "claude"' in APP_JS
     assert "function browserEngineAvailable() { return !!navigator.gpu; }" in APP_JS
+    # Locally the default stays claude; the hosted build overrides it.
+    assert 'return window.__prviewDefaultEngine || "claude";' in APP_JS
+
+
+def test_an_engine_that_cannot_answer_here_is_not_selectable():
+    # The hosted page has no local process, so offering claude as the default sent
+    # a first-time visitor's first click straight into an error.
+    assert "function claudeAvailable() { return !window.__prviewNoClaude; }" in APP_JS
+    assert 'opt.disabled = value === "claude" && !claudeAvailable();' in APP_JS
+    saved = APP_JS[APP_JS.index("function savedEngine()"):]
+    saved = saved[:saved.index("\n}\n")]
+    assert "claudeAvailable()" in saved, "a stored claude choice must not survive where claude cannot run"
 
 
 def test_browser_engine_reuses_the_servers_prompt_builders():

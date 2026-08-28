@@ -63,3 +63,9 @@ def test_build_stages_every_asset_the_page_needs(tmp_path):
 def test_hosted_bootstrap_points_the_worker_at_the_page_directory():
     html = bp.rewrite_index(_real_shell())
     assert 'window.__prviewWorkerUrl = "./llm-worker.js"' in html
+
+
+def test_hosted_build_reviews_with_the_browser_model_by_default():
+    html = bp.rewrite_index(_real_shell())
+    assert 'window.__prviewDefaultEngine = "browser"' in html
+    assert "window.__prviewNoClaude = true" in html

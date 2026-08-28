@@ -60,9 +60,17 @@ const BROWSER_MODELS = [
 ];
 const MODEL_KEY = "prview:ai-model";
 
+// The hosted build has no local process to reach, so it sets the default to the
+// engine that can actually answer there.
+function defaultEngine() { return window.__prviewDefaultEngine || "claude"; }
+
+function claudeAvailable() { return !window.__prviewNoClaude; }
+
 function savedEngine() {
-  try { return localStorage.getItem(ENGINE_KEY) === "browser" ? "browser" : "claude"; }
-  catch { return "claude"; }
+  let saved = null;
+  try { saved = localStorage.getItem(ENGINE_KEY); } catch { saved = null; }
+  if (saved === "browser" || (saved === "claude" && claudeAvailable())) return saved;
+  return defaultEngine();
 }
 
 function savedModel() {
@@ -1784,10 +1792,13 @@ function renderAiPanel(path) {
     : "This browser has no WebGPU, so the in-browser engine is unavailable";
   engine.setAttribute("aria-label", "AI engine");
   engine.disabled = !browserEngineAvailable() || ai.status === "running";
-  [["claude", "claude (local)"], ["browser", "in-browser"]].forEach(([value, label]) => {
+  [["claude", claudeAvailable() ? "claude (local)" : "claude — local app only"],
+   ["browser", "in-browser"]].forEach(([value, label]) => {
     const opt = document.createElement("option");
     opt.value = value; opt.textContent = label;
     opt.selected = value === State.engine;
+    // Offered but unselectable where it cannot work, so the trade-off stays visible.
+    opt.disabled = value === "claude" && !claudeAvailable();
     engine.appendChild(opt);
   });
   engine.addEventListener("change", () => setEngine(engine.value, path));

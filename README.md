@@ -90,6 +90,10 @@ See **[Repowise tab](#repowise-tab-optional)** below for first-run steps.
 
 prview is also published as a static site: **https://gwicho38.github.io/prview/**
 
+Reviews there are answered by a code model running on your own GPU through WebGPU — nothing is
+sent anywhere, and there is no key to paste. `claude` is not reachable from a web page, so that
+engine is offered only in the local app.
+
 The hosted build has no backend. It fetches the PR from the GitHub API, runs prview's real
 `core.py` / `order.py` / `behaviors.py` in your browser through Pyodide — the same modules and
 the same tests as the local app, staged by `scripts/build_pages.py` — and keeps review state in

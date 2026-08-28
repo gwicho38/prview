@@ -37,6 +37,10 @@ _BOOTSTRAP = """
     import { installTransport, ghToken, setGhToken } from "./adapter.js";
     // The local app serves the worker from /static; here it sits beside this page.
     window.__prviewWorkerUrl = "./llm-worker.js";
+    // No local process is reachable from a hosted page, so claude cannot answer here
+    // and the browser model is what reviews a PR.
+    window.__prviewDefaultEngine = "browser";
+    window.__prviewNoClaude = true;
     const status = document.getElementById("hosted-status");
     installTransport((text) => { status.textContent = text || "Running locally in your browser"; });
     const field = document.getElementById("gh-token");

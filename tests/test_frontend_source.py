@@ -216,3 +216,11 @@ def test_cancel_reaches_the_browser_engine_too():
     body = APP_JS[APP_JS.index("async function cancelJob(path)"):]
     body = body[:body.index("\n}\n")]
     assert "cancelBrowserModel(ai.localRunId)" in body
+
+
+def test_the_default_browser_model_is_not_the_rough_one():
+    # The 1.5B described a bottom-following fix as keeping content "at the top" and
+    # claimed added logic where the diff removed it. Default to one that can be trusted.
+    first = APP_JS[APP_JS.index("const BROWSER_MODELS = ["):]
+    first = first[:first.index("];")]
+    assert first.index("Qwen2.5-Coder-7B") < first.index("Qwen2.5-Coder-1.5B")

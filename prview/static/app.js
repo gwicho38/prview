@@ -54,9 +54,9 @@ const GROUP_KEY = "prview:group-behaviors";
 // smaller model and downloads weights on first use.
 const ENGINE_KEY = "prview:ai-engine";
 const BROWSER_MODELS = [
-  ["Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC", "Qwen2.5-Coder 1.5B (~1.1 GB)"],
   ["Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC", "Qwen2.5-Coder 7B (~4.3 GB)"],
   ["Llama-3.2-3B-Instruct-q4f16_1-MLC", "Llama 3.2 3B (~1.9 GB)"],
+  ["Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC", "Qwen2.5-Coder 1.5B (~1.1 GB, rough)"],
 ];
 const MODEL_KEY = "prview:ai-model";
 

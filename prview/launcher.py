@@ -40,7 +40,26 @@ DAEMON_FILE = STATE_DIR / "daemon.json"
 DAEMON_LOG = STATE_DIR / "daemon.log"
 
 
+# A new port every launch is a new browser origin, which silently discards the
+# localStorage prefs and the cached in-browser model weights. Prefer one port.
+PREFERRED_PORT = 8420
+
+
+def _port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((HOST, port))
+            return True
+        except OSError:
+            return False
+
+
 def pick_free_port() -> int:
+    pinned = os.environ.get("PRVIEW_PORT")
+    if pinned:
+        return int(pinned)
+    if _port_is_free(PREFERRED_PORT):
+        return PREFERRED_PORT
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, 0))
         return s.getsockname()[1]

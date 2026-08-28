@@ -408,8 +408,9 @@ a { color: var(--accent); }
 .fl-row.current { background: var(--bg-elev-2); box-shadow: inset 3px 0 0 var(--accent); }
 .fl-marker { color: var(--accent); width: 16px; }
 .fl-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.fl-base { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
-.fl-dir { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-dim); font-size: 11px; min-width: 0; }
+/* Basename wins the row: truncating it to `chan…` costs the only part that identifies the file. */
+.fl-base { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.fl-dir { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-dim); font-size: 11px; min-width: 0; }
 .fl-counts { color: var(--fg-muted); }
 .fl-counts .ps-adds, .fl-counts .ps-dels { margin-left: 4px; }
 .fl-badges { display: inline-flex; gap: 4px; min-width: 14px; }

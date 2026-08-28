@@ -101,8 +101,8 @@ See **[Repowise tab](#repowise-tab-optional)** below for first-run steps.
 4. Use the AI panel: a summary auto-loads; **Explain** for a deep walk-through; **Ask** to query the file.
    The **engine** dropdown picks who answers. `claude (local)` runs the CLI. `in-browser`
    runs a small code model on your own GPU via WebGPU — no CLI, no API key, and nothing
-   leaves the machine. The in-browser engine downloads weights (1.1 GB for the default
-   Qwen2.5-Coder 1.5B, up to 4.3 GB for the 7B) from the MLC CDN on first use and caches
+   leaves the machine. The in-browser engine downloads weights (4.3 GB for the default
+   Qwen2.5-Coder 7B, 1.1 GB for the smaller 1.5B) from the MLC CDN on first use and caches
    them in the browser; it is the only part of prview that contacts a third party, and it
    only runs when you select it. Expect ~45s for the first answer and ~5s after that, and
    a smaller model than claude — good for per-file summaries, weaker on whole-PR reasoning.

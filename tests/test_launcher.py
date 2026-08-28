@@ -206,3 +206,29 @@ def test_parser_dispatches_serve_subcommand_with_port_and_token():
     assert args.command == "_serve"
     assert args.port == 8123
     assert args.token == "tok"
+
+
+def test_preferred_port_is_stable_across_launches():
+    # Browser caches (the in-browser model weights, localStorage) are keyed by
+    # origin, so a new port each launch silently discards them.
+    assert launcher.pick_free_port() == launcher.pick_free_port() == launcher.PREFERRED_PORT
+
+
+def test_port_falls_back_when_the_preferred_one_is_taken():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as taken:
+        taken.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        taken.bind((launcher.HOST, launcher.PREFERRED_PORT))
+        taken.listen(1)
+        port = launcher.pick_free_port()
+    assert port != launcher.PREFERRED_PORT
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((launcher.HOST, port))
+
+
+def test_port_can_be_pinned_by_environment():
+    import os
+    os.environ["PRVIEW_PORT"] = "8123"
+    try:
+        assert launcher.pick_free_port() == 8123
+    finally:
+        del os.environ["PRVIEW_PORT"]

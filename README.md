@@ -86,6 +86,20 @@ ollama pull qwen2.5:3b          # fast; or a larger model for better prose
 
 See **[Repowise tab](#repowise-tab-optional)** below for first-run steps.
 
+## Try it without installing anything
+
+prview is also published as a static site: **https://gwicho38.github.io/prview/**
+
+The hosted build has no backend. It fetches the PR from the GitHub API, runs prview's real
+`core.py` / `order.py` / `behaviors.py` in your browser through Pyodide — the same modules and
+the same tests as the local app, staged by `scripts/build_pages.py` — and keeps review state in
+`localStorage`. Public PRs work with no sign-in; paste a GitHub token (kept in `sessionStorage`,
+sent only to `api.github.com`) to read private ones or to post comments and reviews.
+
+Two features stay local-only, because they need processes a web page cannot start: the `claude`
+engine and everything under Repowise. Set the AI engine to `in-browser` and a small code model
+runs on your own GPU instead.
+
 ## Reviewing a PR
 
 1. Enter `owner/repo#123` (or a full GitHub PR URL) and press **Load PR**.

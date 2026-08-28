@@ -208,19 +208,29 @@ def test_parser_dispatches_serve_subcommand_with_port_and_token():
     assert args.token == "tok"
 
 
-def test_preferred_port_is_stable_across_launches():
+@pytest.fixture
+def free_preferred_port(monkeypatch):
+    """Point PREFERRED_PORT at a port this test owns — the real one may be in use
+    by a prview the developer is running, which is not the tests' business."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((launcher.HOST, 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setattr(launcher, "PREFERRED_PORT", port)
+    return port
+
+
+def test_preferred_port_is_stable_across_launches(free_preferred_port):
     # Browser caches (the in-browser model weights, localStorage) are keyed by
     # origin, so a new port each launch silently discards them.
-    assert launcher.pick_free_port() == launcher.pick_free_port() == launcher.PREFERRED_PORT
+    assert launcher.pick_free_port() == launcher.pick_free_port() == free_preferred_port
 
 
-def test_port_falls_back_when_the_preferred_one_is_taken():
+def test_port_falls_back_when_the_preferred_one_is_taken(free_preferred_port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as taken:
-        taken.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        taken.bind((launcher.HOST, launcher.PREFERRED_PORT))
+        taken.bind((launcher.HOST, free_preferred_port))
         taken.listen(1)
         port = launcher.pick_free_port()
-    assert port != launcher.PREFERRED_PORT
+        assert port != free_preferred_port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind((launcher.HOST, port))
 

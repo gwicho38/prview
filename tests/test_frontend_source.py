@@ -208,7 +208,7 @@ def test_browser_engine_reuses_the_servers_prompt_builders():
 
 
 def test_browser_generation_runs_in_a_worker_not_the_main_thread():
-    assert 'new Worker("/static/llm-worker.js")' in APP_JS
+    assert "new Worker(" in APP_JS and "llm-worker.js" in APP_JS
     assert "import(WEBLLM)" not in APP_JS, "the model must be imported in the worker, not app.js"
 
 
@@ -224,3 +224,13 @@ def test_the_default_browser_model_is_not_the_rough_one():
     first = APP_JS[APP_JS.index("const BROWSER_MODELS = ["):]
     first = first[:first.index("];")]
     assert first.index("Qwen2.5-Coder-7B") < first.index("Qwen2.5-Coder-1.5B")
+
+
+def test_the_ui_can_run_without_a_server_behind_it():
+    # The hosted Pages build swaps the transport, not the UI.
+    assert "if (window.__prviewTransport) return window.__prviewTransport(method, path, body);" in APP_JS
+
+
+def test_the_model_worker_url_is_overridable_and_load_failures_surface():
+    assert 'new Worker(window.__prviewWorkerUrl || "/static/llm-worker.js")' in APP_JS
+    assert "_llm.onerror" in APP_JS, "a worker that 404s must reject its waiters, not hang"

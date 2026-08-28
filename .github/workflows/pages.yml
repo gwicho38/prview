@@ -1,0 +1,69 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pages/**"
+      - "scripts/build_pages.py"
+      - "prview/static/**"
+      - "prview/core.py"
+      - "prview/order.py"
+      - "prview/behaviors.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The page runs the real core through Pyodide, not a JavaScript port of it.
+      # The staging step also fails the build on a non-stdlib import, which Pyodide
+      # could not install, and on a shell that would double-load app.js.
+      - name: Stage the hosted build
+        run: python scripts/build_pages.py
+
+      - name: Verify the bundle is self-contained
+        run: |
+          set -euo pipefail
+          for f in index.html app.js adapter.js styles.css llm-worker.js \
+                   prview/core.py prview/order.py prview/behaviors.py \
+                   vendor/diff2html.min.js; do
+            test -s "pages/$f" || { echo "::error::pages/$f missing or empty"; exit 1; }
+          done
+          if grep -q '/static/' pages/index.html; then
+            echo "::error::index.html still points at the local server's /static paths"; exit 1
+          fi
+          test "$(grep -c 'app.js' pages/index.html)" = "1" \
+            || { echo "::error::app.js must be referenced exactly once (the bootstrap injects it)"; exit 1; }
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

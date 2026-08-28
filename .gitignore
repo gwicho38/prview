@@ -9,3 +9,7 @@ __pycache__/
 .repowise/
 coverage.lcov
 lcov.info
+
+# Hosted build: adapter.js is source, everything else is staged by scripts/build_pages.py
+pages/*
+!pages/adapter.js

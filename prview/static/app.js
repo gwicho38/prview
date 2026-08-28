@@ -114,6 +114,9 @@ class ApiError extends Error {
 }
 
 async function rawFetch(method, path, body) {
+  // The hosted build has no server: pages/adapter.js installs a transport that
+  // answers the same paths from the GitHub API and the core running in Pyodide.
+  if (window.__prviewTransport) return window.__prviewTransport(method, path, body);
   const headers = { [TOKEN_HEADER]: TOKEN };
   const opts = { method, headers };
   if (body !== undefined) {
@@ -1550,7 +1553,16 @@ const _llmWaiters = new Map();
 
 function llmWorker() {
   if (_llm) return _llm;
-  _llm = new Worker("/static/llm-worker.js");
+  // The hosted build serves the worker beside index.html, the local app under /static.
+  _llm = new Worker(window.__prviewWorkerUrl || "/static/llm-worker.js");
+  // A worker that fails to load (wrong path, blocked import) otherwise leaves every
+  // caller awaiting a promise that can never settle.
+  _llm.onerror = (err) => {
+    const reason = new Error(err.message || "the in-browser model worker failed to load");
+    _llmWaiters.forEach((w) => w.reject(reason));
+    _llmWaiters.clear();
+    _llm = null;
+  };
   _llm.onmessage = (e) => {
     const msg = e.data || {};
     if (msg.type === "progress") { _llmWaiters.forEach((x) => x.onProgress(msg)); return; }
@@ -1805,7 +1817,9 @@ function renderAiPanel(path) {
   if (ai.status === "running") {
     const loading = document.createElement("div");
     loading.className = "ai-loading";
-    const localRun = State.engine === "browser" && ai.localRunId;
+    // Not gated on localRunId: that lands only after the prompt fetch resolves,
+    // which would show the server-polling copy for a run that never touches a server.
+    const localRun = State.engine === "browser";
     const note = localRun
       ? (ai.loadNote ? `Loading model — ${ai.loadNote}` : "Generating in this browser")
       : "Analyzing diff… (job submitted, polling";

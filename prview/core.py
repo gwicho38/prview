@@ -390,69 +390,48 @@ _OVERVIEW_BODY_LIMIT = 8_000
 # review comments on lyskdev/ultron#1272 (the motivating example). Structure
 # and density are the target — content is from another project.
 _OVERVIEW_EXEMPLARS = '''
-Example A — before/after pair (structure to imitate; emit ASCII, not mermaid):
+The two examples below give the SHAPE to imitate. Every <angle-bracketed> slot is a
+placeholder: replace it with a name that appears in this PR's diff, title, or
+description. Reusing a word from inside an example means the diagram is wrong.
 
-## Before / After — consolidation scheduling
+Example A — before/after pair:
 
-### Before — two independent clocks
-
-```
- [Segment finalized] ──► finalized-segment count ──► consolidation window
-        │                                                  │
-        └──► extraction LLM call (variable latency) ──► fact persisted
-                                                           │
-             window already moved past the fact's segment? ▼
-             ❌ SILENTLY DROPPED — never revisited
-```
-
-### After — one durable FIFO queue
+### Before — <name the arrangement this PR replaces>
 
 ```
- [Segment finalized] ──► candidate persisted (status = pending)
+ [<trigger>] ──► <step> ──► <resulting state>
         │
-        ▼
- consolidation cycle: pull pending (FIFO) ──► one LLM call per batch
-        │ success                                 │ error / unparseable
-        ▼                                         ▼
- mark_consolidated ✅ ──► Event            stays pending, attempts += 1
-                                           attempts ≥ 5 ──► failed
+        └──► <other path> ──► <its outcome>
+                                   │ <condition>?
+                                   ▼
+                              <what is lost or fails>
 ```
 
-**Net effect:** extraction lag now affects *when* an event appears, never *whether*.
-
-Example B — entity lifecycle (already ASCII; imitate the annotated edges):
-
-## Single candidate lifecycle — birth → event
+### After — <name the new arrangement>
 
 ```
- ┌─────────────────────┐
- │  Utterance segment  │
- │     finalized       │
- └──────────┬──────────┘
-            ▼  candidate persisted
- ╔═════════════════════╗
- ║       PENDING       ║  consolidation_attempts = 0
- ╚══╤═══════════╤══════╝
-    │           │ source segment soft-deleted
-    │           ▼
-    │       ╔═══════════╗
-    │       ║  SKIPPED  ║  terminal
-    │       ╚═══════════╝
-    │ picked up by cycle (FIFO)
-    ▼
- one consolidation LLM call per batch
-    │ success              │ error / unparseable
-    ▼                      ▼
- ╔══════════════╗      attempts += 1
- ║ CONSOLIDATED ║──►Event   │ attempts < 5 → back to PENDING
- ╚══════════════╝           │ attempts ≥ 5 ▼
-     terminal            ╔══════════╗
-                         ║  FAILED  ║  terminal, queryable
-                         ╚══════════╝
+ [<same trigger>] ──► <new step> ──► <new state>
+        │ <success condition>          │ <error condition>
+        ▼                              ▼
+ <terminal state>                 <retry or failure state>
 ```
 
-Key edge: crash between LLM success and mark_consolidated → replayed next cycle →
-dedup absorbs the duplicate. At-least-once by design.
+**Net effect:** <one sentence naming what this PR changed>
+
+Example B — entity lifecycle:
+
+```
+ ┌──────────────────┐
+ │ <entity created> │
+ └────────┬─────────┘
+          ▼ <transition condition>
+ ╔══════════════════╗
+ ║   <STATE NAME>   ║
+ ╚═══╤══════════╤═══╝
+     │          │ <edge condition>
+     ▼          ▼
+ <terminal>  <other terminal>
+```
 '''
 
 
@@ -500,6 +479,8 @@ def build_overview_prompt(pr: PRInfo, files: list) -> str:
         "- No mermaid, no HTML, no images.\n"
         "- Keep lines inside fenced blocks under 100 characters.\n"
         "- Annotate diagram edges with the condition that triggers them.\n"
+        "- Replace every <angle-bracketed> slot from the examples with a real name from\n"
+        "  this PR, or drop that box and its edge. No slot survives into the answer.\n"
     )
 
     return header + diffs + "\n" + instructions + "\n" + _OVERVIEW_EXEMPLARS

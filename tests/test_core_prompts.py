@@ -183,6 +183,10 @@ def test_overview_prompt_forbids_leaving_slots_in_the_answer():
     p = core.build_overview_prompt(_ov_pr(), [])
     assert "No slot survives into the answer." in p
 
+    # Naming the slot characters is what actually stops a model emitting `<trigger>`
+    # into a finished diagram; the rule above alone left them in place on 7B.
+    assert "must not contain the characters < or >" in p
+
 
 def test_behavior_names_prompt_carries_ids_titles_and_files_but_no_diffs():
     pr = core.PRInfo(owner="o", repo="r", number=7, title="Add orders", body="why")

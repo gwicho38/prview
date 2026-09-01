@@ -481,6 +481,8 @@ def build_overview_prompt(pr: PRInfo, files: list) -> str:
         "- Annotate diagram edges with the condition that triggers them.\n"
         "- Replace every <angle-bracketed> slot from the examples with a real name from\n"
         "  this PR, or drop that box and its edge. No slot survives into the answer.\n"
+        "- Your answer must not contain the characters < or > anywhere. They mark\n"
+        "  slots in the examples only.\n"
     )
 
     return header + diffs + "\n" + instructions + "\n" + _OVERVIEW_EXEMPLARS

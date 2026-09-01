@@ -42,6 +42,9 @@ _BOOTSTRAP = """
     // and the browser model is what reviews a PR.
     window.__prviewDefaultEngine = "browser";
     window.__prviewNoClaude = true;
+    // Repowise indexes a checkout through a local CLI, which a hosted page has no
+    // way to reach, so that tab is not offered here.
+    window.__prviewNoRepowise = true;
     const status = document.getElementById("hosted-status");
     installTransport((text) => { status.textContent = text || "Running locally in your browser"; });
     const field = document.getElementById("gh-token");

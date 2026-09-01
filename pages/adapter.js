@@ -286,8 +286,22 @@ ${build}
     return { prompt };
   }
 
+  // No server-side overview cache here: the client generates one per session
+  // with the in-browser model, so an empty answer means "nothing stored yet".
+  if (method === "GET" && seg[0] === "overview" && seg.length === 4) return {};
+
+  if (method === "POST" && seg[0] === "overview" && seg[1] === "comment") {
+    const { owner, repo, number, markdown } = body;
+    if (!markdown) {
+      throw new HttpError(404, "no overview generated for this PR", "generate the overview first");
+    }
+    await gh(`/repos/${owner}/${repo}/issues/${number}/comments`,
+             { method: "POST", body: { body: markdown } });
+    return { ok: true };
+  }
+
   // Every AI path other than the prompt needs a local process.
-  if (seg[0] === "ai" || seg[0] === "job" || (seg[0] === "overview" && method === "GET")) {
+  if (seg[0] === "ai" || seg[0] === "job") {
     throw new HttpError(501, "This engine needs the local app",
       "switch the AI engine to `in-browser`, which runs without a server");
   }

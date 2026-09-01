@@ -14,7 +14,32 @@ def test_pr_load_defaults_to_overview():
 
 def test_hash_routing_covers_all_tabs():
     assert "hashchange" in APP_JS
-    assert 'return State.standalone ? ["review", "repowise"] : ["overview", "review", "repowise"];' in APP_JS
+    assert 'const tabs = State.standalone ? ["review"] : ["overview", "review"];' in APP_JS
+    assert 'if (repowiseAvailable()) tabs.push("repowise");' in APP_JS
+
+
+def test_a_build_without_a_local_process_offers_no_repowise_tab():
+    assert "function repowiseAvailable() { return !window.__prviewNoRepowise; }" in APP_JS
+    assert 'if (repowiseAvailable()) tabs.append(mk("repowise", "Repowise"));' in APP_JS
+
+
+def test_the_overview_runs_on_the_browser_engine_when_that_is_the_engine():
+    assert 'if (State.engine === "browser") { await runOverviewInBrowser(); return; }' in APP_JS
+    assert 'api("POST", "/ai/prompt", { ...prKey(), kind: "overview" })' in APP_JS
+    assert "runBrowserModel(prompt, {" in APP_JS
+
+
+def test_the_browser_overview_waits_for_a_click_instead_of_downloading_weights():
+    assert 'ov.status = "ready";' in APP_JS
+    assert '"The overview runs a model in this browser. The first run downloads its weights."' in APP_JS
+
+
+def test_cancel_reaches_a_locally_running_overview():
+    assert "if (localRunId) cancelBrowserModel(localRunId);" in APP_JS
+
+
+def test_posting_an_overview_carries_the_markdown_for_serverless_builds():
+    assert 'api("POST", "/overview/comment", { ...prKey(), markdown: ovState().markdown })' in APP_JS
 
 
 def test_nav_tabs_order_overview_first():

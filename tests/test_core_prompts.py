@@ -164,6 +164,26 @@ def test_overview_prompt_embeds_exemplars():
     assert core._OVERVIEW_EXEMPLARS.strip() in p
 
 
+def test_overview_exemplars_carry_slots_not_finished_diagrams():
+    # A worked example is copied verbatim by small models, whatever the diff says,
+    # so every labelled line inside the examples must be a placeholder to fill.
+    inside, labelled = False, 0
+    for line in core._OVERVIEW_EXEMPLARS.splitlines():
+        if line.startswith("```"):
+            inside = not inside
+            continue
+        if not inside or not any(c.isalpha() for c in line):
+            continue
+        labelled += 1
+        assert "<" in line, f"exemplar line is finished content, not a slot: {line!r}"
+    assert labelled >= 8
+
+
+def test_overview_prompt_forbids_leaving_slots_in_the_answer():
+    p = core.build_overview_prompt(_ov_pr(), [])
+    assert "No slot survives into the answer." in p
+
+
 def test_behavior_names_prompt_carries_ids_titles_and_files_but_no_diffs():
     pr = core.PRInfo(owner="o", repo="r", number=7, title="Add orders", body="why")
     derived = [

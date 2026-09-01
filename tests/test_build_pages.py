@@ -23,6 +23,10 @@ def test_stdlib_only_allows_relative_and_stdlib_imports():
     bp.assert_stdlib_only({"order.py": "import re\nfrom .core import FileDiff\nfrom typing import Any\n"})
 
 
+def test_bootstrap_hides_the_tab_that_needs_a_local_cli():
+    assert "window.__prviewNoRepowise = true;" in bp._BOOTSTRAP
+
+
 def _real_shell():
     return (bp.ROOT / "prview" / "static" / "index.html").read_text()
 

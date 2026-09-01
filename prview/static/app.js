@@ -66,6 +66,10 @@ function defaultEngine() { return window.__prviewDefaultEngine || "claude"; }
 
 function claudeAvailable() { return !window.__prviewNoClaude; }
 
+// Repowise needs an indexed repo and a local CLI, so builds without a local
+// process drop the tab rather than offer one that can only fail.
+function repowiseAvailable() { return !window.__prviewNoRepowise; }
+
 function savedEngine() {
   let saved = null;
   try { saved = localStorage.getItem(ENGINE_KEY); } catch { saved = null; }
@@ -208,7 +212,9 @@ function syncHash(screen) {
 }
 
 function tabOrder() {
-  return State.standalone ? ["review", "repowise"] : ["overview", "review", "repowise"];
+  const tabs = State.standalone ? ["review"] : ["overview", "review"];
+  if (repowiseAvailable()) tabs.push("repowise");
+  return tabs;
 }
 
 function initialTab() {
@@ -558,7 +564,8 @@ function buildNavTabs() {
     return b;
   };
   if (!State.standalone) tabs.append(mk("overview", "Overview"));
-  tabs.append(mk("review", "Review"), mk("repowise", "Repowise"));
+  tabs.append(mk("review", "Review"));
+  if (repowiseAvailable()) tabs.append(mk("repowise", "Repowise"));
   const hint = document.createElement("span");
   hint.className = "kbd nav-tabs-hint";
   hint.textContent = "g";
@@ -3240,7 +3247,8 @@ function openRepoPathModal() {
 // ============================================================================
 function ovState() {
   if (!State.ov) {
-    State.ov = { status: "idle", jobId: null, markdown: "", sha: null, error: "", elapsed: 0 };
+    State.ov = { status: "idle", jobId: null, localRunId: null, markdown: "", partial: "",
+                 loadNote: "", sha: null, error: "", elapsed: 0 };
   }
   return State.ov;
 }
@@ -3262,6 +3270,8 @@ async function renderOverview() {
     }
     if (data.markdown) {
       ov.markdown = data.markdown; ov.sha = data.sha; ov.status = "done";
+    } else if (State.engine === "browser") {
+      ov.status = "ready";         // generating downloads weights, so it waits for a click
     } else {
       startOverviewJob();          // no cache, or stale SHA → regenerate
       return;
@@ -3274,6 +3284,7 @@ async function startOverviewJob() {
   const ov = ovState();
   ov.status = "running"; ov.error = ""; ov.elapsed = 0; ov.jobId = null;
   paintOverview();
+  if (State.engine === "browser") { await runOverviewInBrowser(); return; }
   try {
     const { job_id } = await api("POST", "/ai/overview", prKey());
     ov.jobId = job_id;
@@ -3310,19 +3321,53 @@ async function startOverviewJob() {
   }
 }
 
+// The browser engine has no job runner, so the overview streams from the same
+// in-browser model the per-file panels use, against the same prompt.
+async function runOverviewInBrowser() {
+  const ov = ovState();
+  const t0 = Date.now();
+  try {
+    const { prompt } = await api("POST", "/ai/prompt", { ...prKey(), kind: "overview" });
+    const run = runBrowserModel(prompt, {
+      onToken: (text) => { ov.partial = text; if (activeScreen === "overview") paintOverview(); },
+      onProgress: (p) => { ov.loadNote = p.text || ""; if (activeScreen === "overview") paintOverview(); },
+    });
+    ov.localRunId = run.id;
+    const text = await run.done;
+    ov.loadNote = ""; ov.partial = ""; ov.localRunId = null;
+    if (text === null) return;     // cancelled — cancelOverviewJob already repainted
+    ov.markdown = text;
+    ov.sha = State.pr.head_sha;
+    ov.elapsed = Math.floor((Date.now() - t0) / 1000);
+    ov.status = "done";
+    if (activeScreen === "overview") paintOverview();
+    announce("Overview ready");
+  } catch (e) {
+    ov.loadNote = ""; ov.partial = ""; ov.localRunId = null;
+    ov.status = "error";
+    ov.error = e.message + (e.hint ? ` — ${e.hint}` : "");
+    if (activeScreen === "overview") paintOverview();
+    announce("Overview generation failed");
+  }
+}
+
 async function cancelOverviewJob() {
   const ov = ovState();
   const jobId = ov.jobId;
+  const localRunId = ov.localRunId;
   ov.status = ov.markdown ? "done" : "cancelled";
-  ov.jobId = null;
+  ov.jobId = null; ov.localRunId = null; ov.partial = ""; ov.loadNote = "";
   paintOverview();
+  if (localRunId) cancelBrowserModel(localRunId);
   if (jobId) { try { await api("POST", `/job/${jobId}/cancel`); } catch { /* best-effort */ } }
 }
 
 async function postOverviewComment(btn) {
   btn.disabled = true; btn.textContent = "Posting…";
   try {
-    const res = await api("POST", "/overview/comment", prKey());
+    // The markdown rides along so a build with no server-side cache (the hosted
+    // one, which generates in the browser) can post the same text.
+    const res = await api("POST", "/overview/comment", { ...prKey(), markdown: ovState().markdown });
     if (res && res.ok) toast("Overview posted to PR");
     else toast(res.error || "comment failed", "error");
   } catch (e) {
@@ -3343,8 +3388,11 @@ function paintOverview() {
     box.className = "ov-loading";
     const load = document.createElement("div");
     load.className = "ai-loading";
+    const note = ov.loadNote
+      ? `Loading model — ${escapeHtml(ov.loadNote)}`
+      : `Generating overview… ${Math.floor(ov.elapsed || 0)}s (${MAX_NOTE})`;
     load.innerHTML = ov.status === "running"
-      ? `<span class="spinner"></span> Generating overview… ${Math.floor(ov.elapsed || 0)}s (${MAX_NOTE})`
+      ? `<span class="spinner"></span> ${note}`
       : `<span class="spinner"></span> Loading overview…`;
     box.append(load);
     if (ov.status === "running") {
@@ -3354,6 +3402,26 @@ function paintOverview() {
       cancel.addEventListener("click", cancelOverviewJob);
       box.append(cancel);
     }
+    region.appendChild(box);
+    if (ov.partial) {
+      const live = document.createElement("div");
+      live.className = "ov-body ai-body";
+      live.textContent = ov.partial;
+      region.appendChild(live);
+    }
+    return;
+  }
+
+  if (ov.status === "ready") {
+    const box = document.createElement("div");
+    box.className = "ov-loading";
+    const msg = document.createElement("div");
+    msg.textContent = "The overview runs a model in this browser. The first run downloads its weights.";
+    const gen = document.createElement("button");
+    gen.className = "btn";
+    gen.textContent = "Generate";
+    gen.addEventListener("click", startOverviewJob);
+    box.append(msg, gen);
     region.appendChild(box);
     return;
   }

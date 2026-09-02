@@ -83,7 +83,7 @@ _BOOTSTRAP = """
     // surfacing as a mystery 404 once a PR is already loading.
     if (ghToken()) {
       remember.checked = ghTokenIsRemembered();
-      useToken(ghToken(), ghTokenIsRemembered());
+      await useToken(ghToken(), ghTokenIsRemembered());
     }
     // Loaded last and on purpose: the UI issues its first request as it boots, and
     // the transport above has to be in place before that happens.

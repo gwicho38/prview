@@ -111,6 +111,16 @@ def test_a_saved_token_is_verified_and_attributed_before_a_pr_load_needs_it():
     assert "verifyGhToken" in bp._BOOTSTRAP
     assert "Signed in as @" in bp._BOOTSTRAP
     assert "export async function verifyGhToken" in _adapter()
+    # Fire-and-forget here would let app.js spend a revoked remembered token on a
+    # PR load while /user is still in flight — the failure this bar exists to prevent.
+    assert "await useToken(ghToken(), ghTokenIsRemembered());" in bp._BOOTSTRAP
+    assert bp._BOOTSTRAP.index("await useToken") < bp._BOOTSTRAP.index('app.src = "./app.js"')
+
+
+def test_verification_does_not_claim_to_know_the_tokens_scopes():
+    src = _adapter()
+    assert 'res.headers.get("x-oauth-scopes")' not in src
+    assert "scopes:" not in src
 
 
 def test_only_one_store_ever_holds_the_token():

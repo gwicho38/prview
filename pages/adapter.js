@@ -37,7 +37,9 @@ export function setGhToken(token, remember = false) {
   } catch { /* private mode — the token simply stays in memory */ }
 }
 
-/** Confirm a token works and say who it belongs to, before a PR load depends on it. */
+/** Confirm a token works and say who it belongs to, before a PR load depends on it.
+ *  Scopes are deliberately not reported: x-oauth-scopes is not reliably exposed to
+ *  browser JS, so an empty value would read as "no scopes" rather than "unknown". */
 export async function verifyGhToken(token) {
   const res = await fetch(`${GH}/user`, {
     headers: {
@@ -48,7 +50,7 @@ export async function verifyGhToken(token) {
   });
   if (!res.ok) throw await ghFailure(res, token);
   const body = await res.json();
-  return { login: body.login || "", scopes: res.headers.get("x-oauth-scopes") || "" };
+  return { login: body.login || "" };
 }
 
 async function loadPy(onStatus) {

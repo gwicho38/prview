@@ -97,8 +97,24 @@ engine is offered only in the local app.
 The hosted build has no backend. It fetches the PR from the GitHub API, runs prview's real
 `core.py` / `order.py` / `behaviors.py` in your browser through Pyodide — the same modules and
 the same tests as the local app, staged by `scripts/build_pages.py` — and keeps review state in
-`localStorage`. Public PRs work with no sign-in; paste a GitHub token (kept in `sessionStorage`,
-sent only to `api.github.com`) to read private ones or to post comments and reviews.
+`localStorage`. Public PRs work with no sign-in.
+
+### Reviewing a private PR on the hosted site
+
+Paste a GitHub token in the bar at the top. The site checks it against `/user` and shows which
+account it belongs to, so a wrong or revoked token is caught there rather than as a 404 halfway
+through a review. The token is sent only to `api.github.com`.
+
+- **Classic token:** the `repo` scope.
+- **Fine-grained token:** *Contents: read* and *Pull requests: read* on the repositories you review.
+  Add *Pull requests: write* only if you want to post comments and reviews from the page.
+- **Organisation with SAML SSO:** authorize the token for that organisation, or every request
+  comes back 403. The page says so and links GitHub's authorize page when GitHub supplies it.
+
+The token lives in `sessionStorage` and dies with the tab. **Remember on this browser** moves it
+to `localStorage` instead — convenient for daily review, but the token then sits at rest on a
+public origin that loads Pyodide and the model runtime from CDNs, so anything that can run
+script there can read it. **Forget** clears both stores.
 
 Two features stay local-only, because they need processes a web page cannot start: the `claude`
 engine and everything under Repowise. Set the AI engine to `in-browser` and a small code model

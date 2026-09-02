@@ -4,6 +4,7 @@ checks. Brittle by design: renaming these symbols must update this test."""
 from pathlib import Path
 
 APP_JS = (Path(__file__).parent.parent / "prview" / "static" / "app.js").read_text()
+STYLES = (Path(__file__).parent.parent / "prview" / "static" / "styles.css").read_text()
 
 
 def test_pr_load_defaults_to_overview():
@@ -270,3 +271,9 @@ def test_the_ui_can_run_without_a_server_behind_it():
 def test_the_model_worker_url_is_overridable_and_load_failures_surface():
     assert 'new Worker(window.__prviewWorkerUrl || "/static/llm-worker.js")' in APP_JS
     assert "_llm.onerror" in APP_JS, "a worker that 404s must reject its waiters, not hang"
+
+
+def test_a_hidden_button_is_actually_hidden():
+    # The stylesheet opts each class into the hidden attribute one at a time, and
+    # .btn sets display: inline-flex, which outranks the browser default.
+    assert ".btn[hidden] { display: none; }" in STYLES

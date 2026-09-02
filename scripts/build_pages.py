@@ -26,7 +26,15 @@ _ALLOWED_IMPORT = re.compile(
     r"|collections|functools|enum|itertools|math|textwrap)\b|^from\s+\.",
 )
 
-_BOOTSTRAP = """
+_TOKEN_BAR = """
+  <style>
+    .hosted-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                  padding: 8px 16px; border-bottom: 1px solid var(--border);
+                  font-size: 13px; }
+    .hosted-bar .hosted-token { flex: 0 0 340px; max-width: 60vw; }
+    .hosted-bar label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    .hosted-note { opacity: .75; }
+  </style>
   <div class="hosted-bar">
     <span class="hosted-note" id="hosted-status">Loading the prview core…</span>
     <input class="text-input hosted-token" id="gh-token" type="password" autocomplete="off"
@@ -39,6 +47,9 @@ _BOOTSTRAP = """
     <button class="btn" id="gh-token-forget" hidden>Forget</button>
     <span class="hosted-note" id="gh-identity"></span>
   </div>
+"""
+
+_BOOTSTRAP = """
   <script type="module">
     import { installTransport, ghToken, ghTokenIsRemembered, setGhToken, verifyGhToken } from "./adapter.js";
     // The local app serves the worker from /static; here it sits beside this page.
@@ -137,10 +148,15 @@ def rewrite_index(html: str, stamps: dict[str, str] | None = None) -> str:
     html = html.replace(tag, "")
     if "</body>" not in html:
         raise SystemExit("index.html has no </body> to bootstrap into")
+    # The bar goes above the app, not before </body>: appended last it renders below
+    # every screen, off the bottom of a full-height page, where nobody finds it.
+    if "<body>" not in html:
+        raise SystemExit("index.html has no <body> to put the token bar in")
     bootstrap = _BOOTSTRAP
     for name, stamp in stamps.items():
         bootstrap = bootstrap.replace(f'"./{name}"', f'"./{name}?v={stamp}"')
         html = html.replace(f'"./{name}"', f'"./{name}?v={stamp}"')
+    html = html.replace("<body>", "<body>\n" + _TOKEN_BAR, 1)
     return html.replace("</body>", bootstrap + "</body>")
 
 

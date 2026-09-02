@@ -134,6 +134,7 @@ def test_github_refusals_are_told_apart():
     # Each of these is a different fix for the reviewer, so each needs its own message.
     assert "GitHub rejected the token" in src                       # 401
     assert "GitHub rate limit reached" in src                       # 403 + no quota
+    assert "secondary rate limit" in src                            # 403 with quota left
     assert "requires the token to be SSO-authorized" in src         # 403 + SAML org
     assert "Contents: read + Pull requests: read" in src            # 403 + missing scope
     assert "if the repository is private, add a GitHub token" in src  # 404, anonymous

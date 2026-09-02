@@ -113,6 +113,11 @@ async function ghFailure(res, token) {
       "it is invalid, expired, or revoked");
   }
   if (res.status === 403 || res.status === 429) {
+    if (/secondary rate limit/i.test(message)) {
+      const retry = res.headers.get("retry-after");
+      return new HttpError(res.status, "GitHub secondary rate limit — too many requests at once",
+        retry ? `retry in ${retry}s` : "wait a minute and retry");
+    }
     if (res.headers.get("x-ratelimit-remaining") === "0") {
       const reset = Number(res.headers.get("x-ratelimit-reset") || 0) * 1000;
       return new HttpError(res.status, "GitHub rate limit reached",

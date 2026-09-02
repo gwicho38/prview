@@ -316,29 +316,31 @@ async function route(method, path, body) {
   }
 
   if (method === "POST" && seg[0] === "ai" && seg[1] === "prompt") {
-    const { owner, repo, number, kind, path: file, question, selection } = body;
+    const { owner, repo, number, kind, path: file, question, selection, diff_limit } = body;
     const entry = cachedPr(owner, repo, number);
     if (kind === "overview") {
       return { prompt: await pyCall(
-        "core.build_overview_prompt(core.PRInfo(**_in['pr']), [core.FileDiff(**f) for f in _in['files']])",
-        { pr: entry.pr, files: entry.files }) };
+        "core.build_overview_prompt(core.PRInfo(**_in['pr']), [core.FileDiff(**f) for f in _in['files']], _in['diff_limit'])",
+        { pr: entry.pr, files: entry.files, diff_limit: diff_limit || null }) };
     }
     const fd = entry.files.find((f) => f.filename === file);
     if (!fd) throw new HttpError(404, `File not in PR: ${file}`);
     const builders = {
-      summary: "core.build_summary_prompt(_pr, _fd)",
-      explain: "core.build_explain_prompt(_pr, _fd)",
-      ask: "core.build_ask_prompt(_pr, _fd, _in['question'])",
-      "explain-selection": "core.build_explain_selection_prompt(_pr, _fd, _in['selection'])",
+      summary: "core.build_summary_prompt(_pr, _fd, _lim)",
+      explain: "core.build_explain_prompt(_pr, _fd, _lim)",
+      ask: "core.build_ask_prompt(_pr, _fd, _in['question'], _lim)",
+      "explain-selection": "core.build_explain_selection_prompt(_pr, _fd, _in['selection'], _lim)",
     };
     const build = builders[kind];
     if (!build) throw new HttpError(400, `Unknown prompt kind: ${kind}`);
     await loadPy();
-    py.globals.set("_payload", JSON.stringify({ pr: entry.pr, fd, question, selection }));
+    py.globals.set("_payload", JSON.stringify({ pr: entry.pr, fd, question, selection,
+                                                diff_limit: diff_limit || null }));
     const prompt = py.runPython(`
 _in = json.loads(_payload)
 _pr = core.PRInfo(**_in["pr"])
 _fd = core.FileDiff(**{k: v for k, v in _in["fd"].items() if k in {"filename", "diff_text", "additions", "deletions"}})
+_lim = _in["diff_limit"]
 ${build}
 `);
     return { prompt };

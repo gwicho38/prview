@@ -7,6 +7,9 @@
  * user selects the browser engine. */
 
 const WEBLLM = "https://esm.run/@mlc-ai/web-llm";
+// Raising this costs KV-cache VRAM on every model, so it buys room for the prompt
+// budget in app.js rather than trying to fit a whole PR.
+const CONTEXT_WINDOW = 8192;
 
 let engine = null;
 let loadedModel = null;
@@ -19,9 +22,11 @@ function post(type, payload) {
 async function ensureEngine(model) {
   if (engine && loadedModel === model) return engine;
   const { CreateMLCEngine } = await import(WEBLLM);
+  // Every prebuilt model ships overrides.context_window_size = 4096, well under what
+  // the models themselves handle. A PR diff overruns it in a few hundred lines.
   engine = await CreateMLCEngine(model, {
     initProgressCallback: (p) => post("progress", { text: p.text, progress: p.progress ?? 0 }),
-  });
+  }, { context_window_size: CONTEXT_WINDOW });
   loadedModel = model;
   return engine;
 }

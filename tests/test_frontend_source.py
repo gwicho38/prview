@@ -26,7 +26,7 @@ def test_a_build_without_a_local_process_offers_no_repowise_tab():
 
 def test_the_overview_runs_on_the_browser_engine_when_that_is_the_engine():
     assert 'if (State.engine === "browser") { await runOverviewInBrowser(); return; }' in APP_JS
-    assert 'api("POST", "/ai/prompt", { ...prKey(), kind: "overview" })' in APP_JS
+    assert 'kind: "overview", diff_limit: BROWSER_DIFF_LIMIT' in APP_JS
     assert "runBrowserModel(prompt, {" in APP_JS
 
 
@@ -277,3 +277,17 @@ def test_a_hidden_button_is_actually_hidden():
     # The stylesheet opts each class into the hidden attribute one at a time, and
     # .btn sets display: inline-flex, which outranks the browser default.
     assert ".btn[hidden] { display: none; }" in STYLES
+
+
+def test_the_browser_engine_asks_for_a_prompt_its_context_window_can_hold():
+    # Unbudgeted, a large PR builds a ~225KB prompt and the run dies with
+    # "Prompt tokens exceed context window size" instead of reviewing anything.
+    assert "const BROWSER_DIFF_LIMIT = 16_000;" in APP_JS
+    assert APP_JS.count("diff_limit: BROWSER_DIFF_LIMIT") == 2   # per-file and overview
+
+
+def test_the_model_worker_raises_the_prebuilt_context_window():
+    worker = (Path(__file__).parent.parent / "prview" / "static" / "llm-worker.js").read_text()
+    # Every prebuilt model ships overrides.context_window_size = 4096.
+    assert "const CONTEXT_WINDOW = 8192;" in worker
+    assert "{ context_window_size: CONTEXT_WINDOW }" in worker

@@ -320,29 +320,34 @@ def first_hunk_range(diff_text: str) -> tuple[int, int, str] | None:
 _DIFF_LIMIT = 200_000
 
 
-def _clip_diff(diff_text: str) -> str:
-    if len(diff_text) <= _DIFF_LIMIT:
+_TRUNCATION_NOTE_ROOM = 64
+_OMITTED_NAMES_SHOWN = 10
+
+
+def _clip_diff(diff_text: str, diff_limit: int | None = None) -> str:
+    limit = max(diff_limit or _DIFF_LIMIT, 0)
+    if len(diff_text) <= limit:
         return diff_text
-    return diff_text[:_DIFF_LIMIT] + f"\n\n[... diff truncated at {_DIFF_LIMIT} characters ...]"
+    return diff_text[:limit] + f"\n\n[... diff truncated at {limit} characters ...]"
 
 
-def build_summary_prompt(pr: PRInfo, fd: FileDiff) -> str:
+def build_summary_prompt(pr: PRInfo, fd: FileDiff, diff_limit: int | None = None) -> str:
     """Assemble the 1-2 sentence file-summary prompt (src 367-380)."""
     return (
         f"PR: {pr.title} by {pr.author}\n"
         f"File: {fd.filename} (+{fd.additions} -{fd.deletions})\n"
-        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text, diff_limit)}\n```\n\n"
         "In 1-2 sentences, summarize what changed in this file and why. Be direct."
     )
 
 
-def build_explain_prompt(pr: PRInfo, fd: FileDiff) -> str:
+def build_explain_prompt(pr: PRInfo, fd: FileDiff, diff_limit: int | None = None) -> str:
     """Assemble the code-explanation prompt (src 490-502)."""
     return (
         f"You are a code reviewer.\n\n"
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text, diff_limit)}\n```\n\n"
         f"Explain the code in this file. Focus on:\n"
         f"- What does this file do? What is its role in the codebase?\n"
         f"- Walk through the key functions, classes, or data structures line by line\n"
@@ -353,14 +358,15 @@ def build_explain_prompt(pr: PRInfo, fd: FileDiff) -> str:
     )
 
 
-def build_ask_prompt(pr: PRInfo, fd: FileDiff, question: str) -> str:
+def build_ask_prompt(pr: PRInfo, fd: FileDiff, question: str,
+                     diff_limit: int | None = None) -> str:
     """Assemble the ask-about-file prompt (src 514-522)."""
     return (
         f"You are reviewing a pull request.\n\n"
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n"
         f"Description: {pr.body[:1000]}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text, diff_limit)}\n```\n\n"
         f"User question: {question}\n\n"
         f"If the question references something specific — a symbol, function, "
         f"class, file, or line — treat that reference as the anchor: start there "
@@ -370,13 +376,14 @@ def build_ask_prompt(pr: PRInfo, fd: FileDiff, question: str) -> str:
     )
 
 
-def build_explain_selection_prompt(pr: PRInfo, fd: FileDiff, selection: str) -> str:
+def build_explain_selection_prompt(pr: PRInfo, fd: FileDiff, selection: str,
+                                   diff_limit: int | None = None) -> str:
     """Explain one reviewer-highlighted snippet in the context of the file diff."""
     return (
         f"You are a code reviewer.\n\n"
         f"PR: {pr.title} (#{pr.number}) by {pr.author}\n\n"
         f"File: {fd.filename}\n"
-        f"Diff:\n```diff\n{_clip_diff(fd.diff_text)}\n```\n\n"
+        f"Diff:\n```diff\n{_clip_diff(fd.diff_text, diff_limit)}\n```\n\n"
         f"The reviewer highlighted this specific snippet:\n```\n{selection[:2000]}\n```\n\n"
         f"Explain only this snippet, in the context of the file and diff above: what it "
         f"does, how it works mechanically, and why the change matters. Be concise and "
@@ -435,31 +442,46 @@ Example B — entity lifecycle:
 '''
 
 
-def build_overview_prompt(pr: PRInfo, files: list) -> str:
+def build_overview_prompt(pr: PRInfo, files: list, diff_limit: int | None = None) -> str:
     """Assemble the whole-PR orientation prompt: summary + two ASCII diagrams.
 
     Files arrive server-sorted largest-first; whole per-file diffs are appended
     greedily under the shared _DIFF_LIMIT budget, and every omission is stated
     explicitly so the model never guesses at hidden changes.
+
+    A caller with a small context window passes diff_limit, which bounds everything
+    that scales with the PR — description, file table and diffs together — not the
+    diffs alone. A long description and a 30-file table are several thousand
+    characters on their own, enough to overrun the window with no diff at all.
     """
+    limit = diff_limit or _DIFF_LIMIT
+    body_room = min(_OVERVIEW_BODY_LIMIT, limit // 4) if diff_limit else _OVERVIEW_BODY_LIMIT
     table = "\n".join(f"- {f.filename} (+{f.additions} -{f.deletions})" for f in files)
+    if diff_limit and len(table) > limit // 4:
+        kept = table[:limit // 4].rsplit("\n", 1)[0]
+        table = f"{kept}\n- [table truncated; {len(files)} files changed in total]"
     header = (
         f"PR #{pr.number}: {pr.title} by {pr.author}\n\n"
-        f"Description:\n{pr.body[:_OVERVIEW_BODY_LIMIT]}\n\n"
+        f"Description:\n{pr.body[:body_room]}\n\n"
         f"Changed files ({len(files)}):\n{table}\n\n"
     )
 
+    limit = max(limit - len(header), 0) if diff_limit else limit
     blocks, used, omitted = [], 0, []
     for f in files:
-        block = f"### {f.filename}\n```diff\n{f.diff_text}\n```\n"
-        if used + len(block) > _DIFF_LIMIT:
+        wrapper = len(f"### {f.filename}\n```diff\n\n```\n") + _TRUNCATION_NOTE_ROOM
+        body = f.diff_text if diff_limit is None else _clip_diff(f.diff_text, limit - used - wrapper)
+        block = f"### {f.filename}\n```diff\n{body}\n```\n"
+        if used + len(block) > limit:
             omitted.append(f.filename)
             continue
         used += len(block)
         blocks.append(block)
     diffs = "Diffs of the largest changed files:\n" + "".join(blocks)
     if omitted:
-        diffs += f"\n[diffs omitted for {len(omitted)} smaller files: {', '.join(omitted)}]\n"
+        named = omitted if diff_limit is None else omitted[:_OMITTED_NAMES_SHOWN]
+        rest = "" if len(named) == len(omitted) else f", and {len(omitted) - len(named)} more"
+        diffs += f"\n[diffs omitted for {len(omitted)} smaller files: {', '.join(named)}{rest}]\n"
 
     instructions = (
         "You are orienting a code reviewer who has not read this PR yet. Produce\n"

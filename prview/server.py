@@ -323,13 +323,17 @@ async def ai_explain_selection(req: ExplainSelectionRequest) -> JobIdResponse:
 
 
 # The browser-side model engine builds nothing itself: it asks for the very prompt
-# the claude path would send, so both engines stay one implementation.
+# the claude path would send, so both engines stay one implementation. It may ask for a
+# smaller diff budget, because it runs in a context window a fraction of claude's; the
+# prompt then states what was cut.
+# Reached only from post_ai_prompt, so req is always a PromptRequest; the
+# /ai/* job endpoints build their prompts through jobs.py instead.
 _FILE_PROMPTS = {
-    "summary": lambda pr, fd, req: core.build_summary_prompt(pr, fd),
-    "explain": lambda pr, fd, req: core.build_explain_prompt(pr, fd),
-    "ask": lambda pr, fd, req: core.build_ask_prompt(pr, fd, req.question),
+    "summary": lambda pr, fd, req: core.build_summary_prompt(pr, fd, req.diff_limit),
+    "explain": lambda pr, fd, req: core.build_explain_prompt(pr, fd, req.diff_limit),
+    "ask": lambda pr, fd, req: core.build_ask_prompt(pr, fd, req.question, req.diff_limit),
     "explain-selection": lambda pr, fd, req: core.build_explain_selection_prompt(
-        pr, fd, req.selection),
+        pr, fd, req.selection, req.diff_limit),
 }
 _PROMPT_REQUIRED = {"ask": "question", "explain-selection": "selection"}
 
@@ -338,7 +342,8 @@ _PROMPT_REQUIRED = {"ask": "question", "explain-selection": "selection"}
 def post_ai_prompt(req: PromptRequest) -> PromptResponse:
     if req.kind == "overview":
         entry = _cached(req.owner, req.repo, req.number)
-        return PromptResponse(prompt=core.build_overview_prompt(entry["pr"], entry["files"]))
+        return PromptResponse(prompt=core.build_overview_prompt(
+            entry["pr"], entry["files"], req.diff_limit))
     build = _FILE_PROMPTS.get(req.kind)
     if build is None:
         raise _err(400, f"Unknown prompt kind: {req.kind}",

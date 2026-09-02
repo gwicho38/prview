@@ -204,3 +204,44 @@ def test_behavior_names_prompt_carries_ids_titles_and_files_but_no_diffs():
     assert "Add orders" in prompt
     assert "@@" not in prompt and "diff --git" not in prompt
     assert "->" in prompt
+
+
+def test_a_budget_shrinks_the_prompt_and_says_where_it_cut():
+    fd = core.FileDiff(filename="big.py", diff_text="x" * 50_000, additions=1, deletions=0)
+    full = core.build_explain_prompt(_ov_pr(), fd)
+    budgeted = core.build_explain_prompt(_ov_pr(), fd, diff_limit=20_000)
+    assert len(full) > 50_000
+    assert len(budgeted) < 21_000
+    assert "diff truncated at 20000 characters" in budgeted
+
+
+def test_an_unbudgeted_prompt_is_byte_identical_to_before():
+    fd = core.FileDiff(filename="a.py", diff_text="y" * 900, additions=1, deletions=0)
+    for build in (core.build_summary_prompt, core.build_explain_prompt):
+        assert build(_ov_pr(), fd) == build(_ov_pr(), fd, diff_limit=None)
+
+
+def test_a_budgeted_overview_still_carries_diff_content():
+    # Whole-file-only budgeting is all-or-nothing: one large file exceeds a small
+    # budget by itself, and every file would end up in the omitted list.
+    files = [core.FileDiff(filename=f"f{i}.py", diff_text="z" * 50_000, additions=1, deletions=0)
+             for i in range(4)]
+    p = core.build_overview_prompt(_ov_pr(), files, diff_limit=20_000)
+    assert len(p) < 23_000
+    assert "zzzz" in p, "a budgeted overview that shows no diff at all is useless"
+    assert "diff truncated at" in p
+    assert "diffs omitted for" in p
+
+
+def test_a_budget_bounds_the_description_and_file_table_too():
+    # Not just the diffs: a long description and a wide file table overran the
+    # context window on their own, before a single line of diff was added.
+    pr = core.PRInfo(owner="o", repo="r", number=1, title="t", body="B" * 9_000)
+    files = [core.FileDiff(filename=f"some/deep/path/file_{i}.py", diff_text="z" * 20_000,
+                           additions=9, deletions=3) for i in range(300)]
+    p = core.build_overview_prompt(pr, files, diff_limit=16_000)
+    assert len(p) < 21_000, len(p)
+    assert "zzzz" in p, "the budget must leave room for actual diff content"
+    assert "table truncated" in p, "300 files list longer than the budget allows"
+    assert "and 2" in p and "more]" in p, "the omitted-file list is itself bounded"
+    assert p.count("B") < 4_100, "the 9,000-character description must be clipped to limit // 4"

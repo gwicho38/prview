@@ -1606,15 +1606,20 @@ function cancelBrowserModel(id) {
   _llmWaiters.delete(id);
 }
 
-// The browser engine asks the server for the prompt the claude path would send,
-// so switching engines cannot silently change what the model is asked.
+// The browser engine asks the server for the prompt the claude path would send, so
+// switching engines cannot silently change what the model is asked — with one stated
+// exception: it asks for a smaller diff budget. The model runs in an 8k context window,
+// where a whole PR overflows and the run fails outright, and the prompt names every
+// diff it had to cut. BROWSER_DIFF_LIMIT leaves room for the instructions and the answer.
+const BROWSER_DIFF_LIMIT = 16_000;
 const _PROMPT_KIND = { "/ai/summary": "summary", "/ai/explain": "explain", "/ai/ask": "ask" };
 
 async function launchBrowserJob(path, endpoint, body) {
   const ai = aiFor(path);
   const kind = _PROMPT_KIND[endpoint];
   const { prompt } = await api("POST", "/ai/prompt",
-                               { ...prKey(), kind, path, question: body.question });
+                               { ...prKey(), kind, path, question: body.question,
+                                 diff_limit: BROWSER_DIFF_LIMIT });
   const run = runBrowserModel(prompt, {
     onToken: (text) => { ai.partial = text; if (isCurrent(path)) renderAiPanel(path); },
     onProgress: (p) => { ai.loadNote = p.text || ""; if (isCurrent(path)) renderAiPanel(path); },
@@ -3327,7 +3332,8 @@ async function runOverviewInBrowser() {
   const ov = ovState();
   const t0 = Date.now();
   try {
-    const { prompt } = await api("POST", "/ai/prompt", { ...prKey(), kind: "overview" });
+    const { prompt } = await api("POST", "/ai/prompt",
+                                 { ...prKey(), kind: "overview", diff_limit: BROWSER_DIFF_LIMIT });
     const run = runBrowserModel(prompt, {
       onToken: (text) => { ov.partial = text; if (activeScreen === "overview") paintOverview(); },
       onProgress: (p) => { ov.loadNote = p.text || ""; if (activeScreen === "overview") paintOverview(); },

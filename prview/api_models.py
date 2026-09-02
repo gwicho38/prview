@@ -227,6 +227,7 @@ class PromptRequest(PRTarget):
     path: str | None = None
     question: str | None = None
     selection: str | None = None
+    diff_limit: int | None = Field(default=None, gt=0)
 
     @field_validator("path")
     @classmethod

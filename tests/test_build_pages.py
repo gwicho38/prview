@@ -102,9 +102,17 @@ def _adapter():
 
 
 def test_remembering_a_token_is_opt_in():
-    assert 'id="gh-remember"' in bp._BOOTSTRAP
-    assert 'type="checkbox" id="gh-remember" />' in bp._BOOTSTRAP, "must not ship checked"
+    assert 'id="gh-remember"' in bp._TOKEN_BAR
+    assert 'type="checkbox" id="gh-remember" />' in bp._TOKEN_BAR, "must not ship checked"
     assert "remember.checked" in bp._BOOTSTRAP
+
+
+def test_the_token_bar_renders_above_the_app():
+    # Injected before </body> it lands under every screen, off the bottom of a
+    # full-height page, and reads as a missing feature.
+    html = bp.rewrite_index(_real_shell())
+    assert html.index('id="gh-token"') < html.index('<div id="app">')
+    assert ".hosted-bar { display: flex" in html, "the bar ships its own styles; none exist in styles.css"
 
 
 def test_a_saved_token_is_verified_and_attributed_before_a_pr_load_needs_it():

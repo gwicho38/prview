@@ -2,8 +2,18 @@
 
 [![CI](https://github.com/gwicho38/prview/actions/workflows/ci.yml/badge.svg)](https://github.com/gwicho38/prview/actions/workflows/ci.yml)
 
-A portable, local-server web app for reviewing GitHub pull requests file-by-file in your browser, with AI assistance. It ports the logic of the `mcli` `pr-review` CLI workflow to a graphical UI while reusing your existing `gh` and `claude` CLIs — no API keys, no tokens to manage.
+**Review a pull request in your browser. Free, no install, no API key.**
 
+→ **[Open prview](https://gwicho38.github.io/prview/)** and paste a PR URL.
+
+The AI review is answered by a code model running on your own GPU through WebGPU, so the
+diff never leaves the tab and there is no key to buy. Private repositories work with a
+GitHub token that is sent only to `api.github.com`. The page is static: there is no
+prview server to trust.
+
+There is also a local app, for reviewing with the `claude` CLI and for the Repowise
+codebase-intelligence tab — the two things a web page cannot start. It reuses your
+existing `gh` and `claude` CLIs, so there are still no API keys to manage.
 
 See the full [user guide](docs/user-guide.md).
 

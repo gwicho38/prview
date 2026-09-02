@@ -326,6 +326,8 @@ async def ai_explain_selection(req: ExplainSelectionRequest) -> JobIdResponse:
 # the claude path would send, so both engines stay one implementation. It may ask for a
 # smaller diff budget, because it runs in a context window a fraction of claude's; the
 # prompt then states what was cut.
+# Reached only from post_ai_prompt, so req is always a PromptRequest; the
+# /ai/* job endpoints build their prompts through jobs.py instead.
 _FILE_PROMPTS = {
     "summary": lambda pr, fd, req: core.build_summary_prompt(pr, fd, req.diff_limit),
     "explain": lambda pr, fd, req: core.build_explain_prompt(pr, fd, req.diff_limit),

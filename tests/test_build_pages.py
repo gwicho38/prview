@@ -95,3 +95,47 @@ def test_asset_urls_carry_a_content_stamp(tmp_path):
 def test_the_stamp_changes_when_the_asset_changes():
     assert bp._stamp("one") != bp._stamp("two")
     assert bp._stamp("same") == bp._stamp("same")
+
+
+def _adapter():
+    return (bp.ROOT / "pages" / "adapter.js").read_text()
+
+
+def test_remembering_a_token_is_opt_in():
+    assert 'id="gh-remember"' in bp._BOOTSTRAP
+    assert 'type="checkbox" id="gh-remember" />' in bp._BOOTSTRAP, "must not ship checked"
+    assert "remember.checked" in bp._BOOTSTRAP
+
+
+def test_a_saved_token_is_verified_and_attributed_before_a_pr_load_needs_it():
+    assert "verifyGhToken" in bp._BOOTSTRAP
+    assert "Signed in as @" in bp._BOOTSTRAP
+    assert "export async function verifyGhToken" in _adapter()
+
+
+def test_only_one_store_ever_holds_the_token():
+    src = _adapter()
+    assert "sessionStorage.removeItem(TOKEN_KEY);\n    localStorage.removeItem(TOKEN_KEY);" in src
+    assert "(remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token)" in src
+
+
+def test_github_refusals_are_told_apart():
+    src = _adapter()
+    # Each of these is a different fix for the reviewer, so each needs its own message.
+    assert "GitHub rejected the token" in src                       # 401
+    assert "GitHub rate limit reached" in src                       # 403 + no quota
+    assert "requires the token to be SSO-authorized" in src         # 403 + SAML org
+    assert "Contents: read + Pull requests: read" in src            # 403 + missing scope
+    assert "if the repository is private, add a GitHub token" in src  # 404, anonymous
+
+
+def test_sso_detection_does_not_depend_on_a_header_the_browser_may_not_see():
+    src = _adapter()
+    assert "/saml|single sign|sso|must be authorized/i.test(message)" in src
+
+
+def test_the_token_only_ever_reaches_the_github_api():
+    targets = re.findall(r"fetch\(([^,)]+)", _adapter())
+    assert targets
+    for t in targets:
+        assert t.startswith("`${GH}") or t.startswith("`./"), f"unexpected fetch target: {t}"

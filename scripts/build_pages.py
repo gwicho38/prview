@@ -30,12 +30,17 @@ _BOOTSTRAP = """
   <div class="hosted-bar">
     <span class="hosted-note" id="hosted-status">Loading the prview core…</span>
     <input class="text-input hosted-token" id="gh-token" type="password" autocomplete="off"
-           spellcheck="false" placeholder="GitHub token (optional — for private PRs, comments)"
+           spellcheck="false" placeholder="GitHub token — for private repos and comments"
            aria-label="GitHub token" />
+    <label class="hosted-note" for="gh-remember">
+      <input type="checkbox" id="gh-remember" /> Remember on this browser
+    </label>
     <button class="btn" id="gh-token-save">Use token</button>
+    <button class="btn" id="gh-token-forget" hidden>Forget</button>
+    <span class="hosted-note" id="gh-identity"></span>
   </div>
   <script type="module">
-    import { installTransport, ghToken, setGhToken } from "./adapter.js";
+    import { installTransport, ghToken, ghTokenIsRemembered, setGhToken, verifyGhToken } from "./adapter.js";
     // The local app serves the worker from /static; here it sits beside this page.
     window.__prviewWorkerUrl = "./llm-worker.js";
     // No local process is reachable from a hosted page, so claude cannot answer here
@@ -48,13 +53,38 @@ _BOOTSTRAP = """
     const status = document.getElementById("hosted-status");
     installTransport((text) => { status.textContent = text || "Running locally in your browser"; });
     const field = document.getElementById("gh-token");
-    if (ghToken()) field.placeholder = "GitHub token saved for this tab";
+    const remember = document.getElementById("gh-remember");
+    const forget = document.getElementById("gh-token-forget");
+    const identity = document.getElementById("gh-identity");
+
+    const say = (text) => { identity.textContent = text; forget.hidden = !ghToken(); };
+
+    async function useToken(token, keep) {
+      say("Checking token…");
+      try {
+        const who = await verifyGhToken(token);
+        setGhToken(token, keep);
+        // Where the token lives is stated on every save, so "remembered" is never a surprise.
+        say(`Signed in as @${who.login} · ${keep ? "remembered on this browser" : "this tab only"}`);
+      } catch (e) {
+        setGhToken("");
+        say(`⚠ ${e.error || e.message}${e.hint ? ` — ${e.hint}` : ""}`);
+      }
+    }
+
     document.getElementById("gh-token-save").addEventListener("click", () => {
-      setGhToken(field.value.trim());
+      const token = field.value.trim();
       field.value = "";
-      field.placeholder = ghToken() ? "GitHub token saved for this tab" : "GitHub token (optional)";
-      status.textContent = ghToken() ? "Token stored for this tab only" : "Token cleared";
+      if (!token) { say("Enter a token first"); return; }
+      useToken(token, remember.checked);
     });
+    forget.addEventListener("click", () => { setGhToken(""); say("Token cleared"); });
+    // A remembered token that has since been revoked says so here, rather than
+    // surfacing as a mystery 404 once a PR is already loading.
+    if (ghToken()) {
+      remember.checked = ghTokenIsRemembered();
+      useToken(ghToken(), ghTokenIsRemembered());
+    }
     // Loaded last and on purpose: the UI issues its first request as it boots, and
     // the transport above has to be in place before that happens.
     const app = document.createElement("script");

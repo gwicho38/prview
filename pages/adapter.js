@@ -17,16 +17,38 @@ let py = null;
 let pyReady = null;
 
 export function ghToken() {
-  try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+  try { return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || ""; }
+  catch { return ""; }
 }
 
-export function setGhToken(token) {
-  // sessionStorage, not localStorage: a token this page never sends anywhere but
-  // api.github.com should not outlive the tab either.
+export function ghTokenIsRemembered() {
+  try { return !!localStorage.getItem(TOKEN_KEY); } catch { return false; }
+}
+
+export function setGhToken(token, remember = false) {
+  // sessionStorage by default: a token this page never sends anywhere but
+  // api.github.com should not outlive the tab either. Remembering moves it to
+  // localStorage, and only ever one store holds it, so the bar's label and
+  // Forget cannot disagree about where it is.
   try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    if (token) (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
   } catch { /* private mode — the token simply stays in memory */ }
+}
+
+/** Confirm a token works and say who it belongs to, before a PR load depends on it. */
+export async function verifyGhToken(token) {
+  const res = await fetch(`${GH}/user`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!res.ok) throw await ghFailure(res, token);
+  const body = await res.json();
+  return { login: body.login || "", scopes: res.headers.get("x-oauth-scopes") || "" };
 }
 
 async function loadPy(onStatus) {
@@ -77,6 +99,42 @@ class HttpError extends Error {
   }
 }
 
+/* GitHub answers "no" in several materially different ways, and a reviewer can only
+ * act on the difference. The response body always carries the reason; x-github-sso and
+ * x-oauth-scopes are not reliably exposed to a browser, so nothing here depends on them. */
+async function ghFailure(res, token) {
+  const body = await res.json().catch(() => ({}));
+  const message = body.message || "";
+
+  if (res.status === 401) {
+    return new HttpError(401, "GitHub rejected the token",
+      "it is invalid, expired, or revoked");
+  }
+  if (res.status === 403 || res.status === 429) {
+    if (res.headers.get("x-ratelimit-remaining") === "0") {
+      const reset = Number(res.headers.get("x-ratelimit-reset") || 0) * 1000;
+      return new HttpError(res.status, "GitHub rate limit reached",
+        reset ? `it resets at ${new Date(reset).toLocaleTimeString()}`
+              : (token ? "wait and retry" : "add a token to raise the limit"));
+    }
+    const sso = res.headers.get("x-github-sso") || "";
+    if (sso || /saml|single sign|sso|must be authorized/i.test(message)) {
+      const url = (sso.match(/url=(\S+)/) || [])[1];
+      return new HttpError(403, "This organization requires the token to be SSO-authorized",
+        url ? `authorize it at ${url}`
+            : "authorize the token for the organization in GitHub's token settings");
+    }
+    return new HttpError(403, message || "GitHub refused the request",
+      "the token needs `repo` (classic) or Contents: read + Pull requests: read (fine-grained)");
+  }
+  if (res.status === 404) {
+    return new HttpError(404, "Not found on GitHub", token
+      ? "check the PR reference, or that this token can see it — a private repo needs `repo` / Contents + Pull requests read, and an SSO org needs the token authorized"
+      : "check the PR reference — if the repository is private, add a GitHub token above");
+  }
+  return new HttpError(res.status, `GitHub returned ${res.status}`, message);
+}
+
 async function gh(path, { method = "GET", accept = "application/vnd.github+json", body } = {}) {
   const token = ghToken();
   const headers = { Accept: accept, "X-GitHub-Api-Version": "2022-11-28" };
@@ -84,14 +142,7 @@ async function gh(path, { method = "GET", accept = "application/vnd.github+json"
   const res = await fetch(`${GH}${path}`, {
     method, headers, body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401 || res.status === 403) {
-    throw new HttpError(res.status, "GitHub rejected the request",
-      token ? "the token may lack `repo` access or have expired" : "add a token to review private or rate-limited PRs");
-  }
-  if (res.status === 404) {
-    throw new HttpError(404, "Not found on GitHub", "check the PR reference, or that your token can see it");
-  }
-  if (!res.ok) throw new HttpError(res.status, `GitHub returned ${res.status}`, await res.text().catch(() => ""));
+  if (!res.ok) throw await ghFailure(res, token);
   return accept.includes("json") ? res.json() : res.text();
 }
 

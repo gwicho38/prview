@@ -283,7 +283,8 @@ def test_the_browser_engine_asks_for_a_prompt_its_context_window_can_hold():
     # Unbudgeted, a large PR builds a ~225KB prompt and the run dies with
     # "Prompt tokens exceed context window size" instead of reviewing anything.
     assert "const BROWSER_DIFF_LIMIT = 16_000;" in APP_JS
-    assert APP_JS.count("diff_limit: BROWSER_DIFF_LIMIT") == 2   # per-file and overview
+    # per-file panel, whole-PR overview, and explain-selection
+    assert APP_JS.count("diff_limit: BROWSER_DIFF_LIMIT") == 3
 
 
 def test_the_model_worker_raises_the_prebuilt_context_window():
@@ -291,3 +292,10 @@ def test_the_model_worker_raises_the_prebuilt_context_window():
     # Every prebuilt model ships overrides.context_window_size = 4096.
     assert "const CONTEXT_WINDOW = 8192;" in worker
     assert "{ context_window_size: CONTEXT_WINDOW }" in worker
+
+
+def test_explain_selection_runs_on_the_browser_engine_too():
+    # It reached only the job endpoint, which a hosted page cannot serve, so
+    # selecting a few lines answered "This engine needs the local app".
+    assert 'kind: "explain-selection", path: f.filename, selection' in APP_JS
+    assert "if (SelExplain.localRunId) { cancelBrowserModel(SelExplain.localRunId)" in APP_JS

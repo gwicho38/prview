@@ -1345,7 +1345,7 @@ function renderDiff(detail, region) {
 // AI explanation in a popover anchored to the selection (independent of the
 // per-file AI panel).
 // ============================================================================
-const SelExplain = { btn: null, pop: null, jobId: null, alive: false };
+const SelExplain = { btn: null, pop: null, jobId: null, localRunId: null, alive: false };
 
 function selPopoverOpen() { return !!SelExplain.pop; }
 
@@ -1388,6 +1388,7 @@ function refreshSelExplainBtn() {
 function closeSelPopover() {
   SelExplain.alive = false;
   SelExplain.jobId = null;
+  if (SelExplain.localRunId) { cancelBrowserModel(SelExplain.localRunId); SelExplain.localRunId = null; }
   if (SelExplain.pop) { SelExplain.pop.remove(); SelExplain.pop = null; }
 }
 
@@ -1431,7 +1432,32 @@ async function runSelExplain(selection, body) {
     e.textContent = `⚠ ${msg}`;
     body.appendChild(e);
   };
+  const show = (text, live) => {
+    body.innerHTML = "";
+    const d = document.createElement("div");
+    d.className = "ai-body";
+    if (live) d.textContent = text; else renderMarkdown(d, text);
+    body.appendChild(d);
+  };
   try {
+    // The browser engine has no job runner: it takes the same prompt and answers locally.
+    if (State.engine === "browser") {
+      const { prompt } = await api("POST", "/ai/prompt",
+        { ...prKey(), kind: "explain-selection", path: f.filename, selection,
+          diff_limit: BROWSER_DIFF_LIMIT });
+      const run = runBrowserModel(prompt, {
+        onToken: (text) => { if (SelExplain.alive) show(text, true); },
+        onProgress: (p) => {
+          if (!SelExplain.alive || !p.text) return;
+          body.innerHTML = `<div class="ai-loading"><span class="spinner"></span> ${escapeHtml(p.text)}</div>`;
+        },
+      });
+      SelExplain.localRunId = run.id;
+      const text = await run.done;
+      SelExplain.localRunId = null;
+      if (text !== null && SelExplain.alive) show(text, false);
+      return;
+    }
     const { job_id } = await api("POST", "/ai/explain-selection",
       { ...prKey(), path: f.filename, selection });
     SelExplain.jobId = job_id;

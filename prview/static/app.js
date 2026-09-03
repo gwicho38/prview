@@ -1432,6 +1432,14 @@ async function runSelExplain(selection, body) {
     e.textContent = `⚠ ${msg}`;
     body.appendChild(e);
   };
+  const spinnerRow = (note) => {
+    const row = document.createElement("div");
+    row.className = "ai-loading";
+    const spin = document.createElement("span");
+    spin.className = "spinner";
+    row.append(spin, ` ${note}`);
+    return row;
+  };
   const show = (text, live) => {
     body.innerHTML = "";
     const d = document.createElement("div");
@@ -1449,7 +1457,7 @@ async function runSelExplain(selection, body) {
         onToken: (text) => { if (SelExplain.alive) show(text, true); },
         onProgress: (p) => {
           if (!SelExplain.alive || !p.text) return;
-          body.innerHTML = `<div class="ai-loading"><span class="spinner"></span> ${escapeHtml(p.text)}</div>`;
+          body.replaceChildren(spinnerRow(p.text));
         },
       });
       SelExplain.localRunId = run.id;

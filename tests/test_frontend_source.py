@@ -299,3 +299,8 @@ def test_explain_selection_runs_on_the_browser_engine_too():
     # selecting a few lines answered "This engine needs the local app".
     assert 'kind: "explain-selection", path: f.filename, selection' in APP_JS
     assert "if (SelExplain.localRunId) { cancelBrowserModel(SelExplain.localRunId)" in APP_JS
+
+
+def test_the_selection_popover_builds_its_progress_row_without_innerhtml():
+    # Model-load progress is third-party text; a DOM node cannot be markup.
+    assert "body.replaceChildren(spinnerRow(p.text))" in APP_JS

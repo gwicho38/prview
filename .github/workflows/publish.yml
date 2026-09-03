@@ -1,0 +1,84 @@
+name: Publish
+
+# Trusted Publishing: PyPI verifies this workflow's OIDC identity, so the project
+# holds no API token that could leak or need rotating.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run tests
+        run: uv sync && uv run pytest -q
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      # The server mounts prview/static at runtime; a wheel without it installs
+      # cleanly and then 404s every asset, which no import check would catch.
+      - name: Verify the wheel carries its static assets
+        run: |
+          python - <<'PY'
+          import zipfile, glob, sys
+          whl = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          required = [
+              "prview/static/index.html",
+              "prview/static/app.js",
+              "prview/static/styles.css",
+              "prview/static/llm-worker.js",
+              "prview/static/vendor/diff2html.min.js",
+          ]
+          missing = [r for r in required if r not in names]
+          if missing:
+              sys.exit(f"wheel {whl} is missing: {missing}")
+          print(f"{whl}: {len(names)} files, static assets present")
+          PY
+
+      - name: Install the wheel and serve from it
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          /tmp/smoke/bin/prview _serve --port 8421 --token ci &
+          python - <<'PY'
+          import time, urllib.request, sys
+          for attempt in range(30):
+              try:
+                  urllib.request.urlopen("http://127.0.0.1:8421/", timeout=2).read()
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              sys.exit("installed server never came up")
+          for path in ("/", "/static/app.js", "/static/vendor/diff2html.min.js"):
+              body = urllib.request.urlopen(f"http://127.0.0.1:8421{path}", timeout=5).read()
+              print(f"{path}: {len(body)} bytes")
+              if not body:
+                  sys.exit(f"{path} served empty")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # the OIDC token Trusted Publishing exchanges for an upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

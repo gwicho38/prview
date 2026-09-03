@@ -107,12 +107,15 @@ def test_remembering_a_token_is_opt_in():
     assert "remember.checked" in bp._BOOTSTRAP
 
 
-def test_the_token_bar_renders_above_the_app():
-    # Injected before </body> it lands under every screen, off the bottom of a
-    # full-height page, and reads as a missing feature.
+def test_the_token_bar_renders_at_the_top_of_the_app():
+    # Before </body> it lands under every screen, off the bottom of a full-height
+    # page. As a sibling above #app — a 100vh flex column — it pushes the column's
+    # last row, the keyboard-shortcut bar, past the viewport with no way to scroll
+    # to it. Inside the column, flex accounts for it.
     html = bp.rewrite_index(_real_shell())
-    assert html.index('id="gh-token"') < html.index('<div id="app">')
-    assert ".hosted-bar { display: flex" in html, "the bar ships its own styles; none exist in styles.css"
+    assert html.index('<div id="app">') < html.index('id="gh-token"')
+    assert html.index('id="gh-token"') < html.index('<header class="appbar">')
+    assert ".hosted-bar { flex: 0 0 auto;" in html, "a flex child that may not stretch"
 
 
 def test_a_saved_token_is_verified_and_attributed_before_a_pr_load_needs_it():

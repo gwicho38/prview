@@ -59,12 +59,21 @@ claude --version                # verify it's on your PATH
 ### 3. prview itself
 
 ```sh
-# Python ≥ 3.10 and uv (https://docs.astral.sh/uv/)
-git clone https://github.com/gwicho38/prview && cd prview
-make install                    # installs the `prview` CLI globally (uv tool install)
+# Python >= 3.10. The package is pr-view; the command it installs is prview.
+uv tool install pr-view         # or: pipx install pr-view
 prview start                    # runs it in the background
 prview open                     # opens it in your browser
 prview stop                     # stops it
+```
+
+The PyPI name is **`pr-view`** with a hyphen. An unrelated project owns `prview`
+there, so `pip install prview` gets someone else's tool.
+
+From a checkout instead:
+
+```sh
+git clone https://github.com/gwicho38/prview && cd prview
+make install                    # uv tool install from source
 ```
 
 `prview` picks a free `127.0.0.1` port, mints a per-session token, and starts the server.

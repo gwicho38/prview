@@ -1,18 +1,35 @@
 [project]
 name = "pr-view"
 version = "0.2.0"
-description = "Web-based file-by-file PR review"
+description = "Review a GitHub pull request file-by-file in your browser, with AI from your local claude CLI"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
+keywords = ["code-review", "pull-request", "github", "diff", "claude", "ai", "developer-tools"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Version Control :: Git",
+]
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
 ]
 
 [project.urls]
-Homepage = "https://github.com/gwicho38/prview"
+Homepage = "https://gwicho38.github.io/prview/"
 Repository = "https://github.com/gwicho38/prview"
+Issues = "https://github.com/gwicho38/prview/issues"
+Changelog = "https://github.com/gwicho38/prview/releases"
 
 [project.scripts]
 prview = "prview.launcher:main"

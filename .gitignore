@@ -17,4 +17,5 @@ pages/*
 # Secrets. Untracked is not enough: hatchling's sdist sweeps untracked-but-unignored files.
 .env
 .env.*
+.envrc
 !.env.example

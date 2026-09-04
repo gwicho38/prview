@@ -30,7 +30,7 @@ install: ## Install the prview CLI globally (uv tool install)
 	uv tool install --force .
 
 uninstall: ## Remove the globally installed prview CLI
-	uv tool uninstall pr-view
+	uv tool uninstall pull-request-view
 
 update: ## Pull the latest main and reinstall the CLI
 	git pull origin main

@@ -59,15 +59,15 @@ claude --version                # verify it's on your PATH
 ### 3. prview itself
 
 ```sh
-# Python >= 3.10. The package is pr-view; the command it installs is prview.
-uv tool install pr-view         # or: pipx install pr-view
-prview start                    # runs it in the background
-prview open                     # opens it in your browser
-prview stop                     # stops it
+# Python >= 3.10. The package is pull-request-view; the command it installs is prview.
+uv tool install pull-request-view    # or: pipx install pull-request-view
+prview start                         # runs it in the background
+prview open                          # opens it in your browser
+prview stop                          # stops it
 ```
 
-The PyPI name is **`pr-view`** with a hyphen. An unrelated project owns `prview`
-there, so `pip install prview` gets someone else's tool.
+The PyPI name is **`pull-request-view`**. An unrelated project already owns `prview`
+there, so `pip install prview` gets someone else's tool. The command stays `prview`.
 
 From a checkout instead:
 

@@ -216,7 +216,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pr-view"
+name = "pull-request-view"
 version = "0.2.1"
 source = { editable = "." }
 dependencies = [

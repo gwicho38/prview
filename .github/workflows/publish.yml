@@ -82,3 +82,6 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # 0.2.1 was uploaded by hand; without this a re-run of its release fails the job.
+          skip-existing: true

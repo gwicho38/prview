@@ -50,5 +50,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["prview"]
 
+# Hatchling's sdist default is every untracked-but-unignored file, .maister/ screenshots included.
+[tool.hatch.build.targets.sdist]
+include = ["prview", "tests", "README.md", "LICENSE"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

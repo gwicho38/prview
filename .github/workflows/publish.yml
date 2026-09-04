@@ -83,5 +83,5 @@ jobs:
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # 0.2.1 was uploaded by hand; without this a re-run of its release fails the job.
+          # Re-running a release whose version already reached PyPI should no-op, not fail.
           skip-existing: true

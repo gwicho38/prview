@@ -104,11 +104,27 @@ class CommentModel(BaseModel):
     text: str
     line: int | None = None
     start_line: int | None = None
+    # A staged comment is a draft: it lives in review state but is not on GitHub.
+    staged: bool = False
+    source: str | None = None
+    severity: str | None = None
+    id: str | None = None
+    run_id: str | None = None
+    suggestion: str | None = None
 
     @classmethod
     def coerce(cls, c) -> "CommentModel":
         # Tolerate legacy entries persisted as bare strings (pre-line-anchor).
         return cls(text=c) if isinstance(c, str) else cls(**c)
+
+
+class ReviewNote(BaseModel):
+    """A finding that anchors to no file — the PR-level tier."""
+    text: str
+    source: str | None = None
+    severity: str | None = None
+    id: str | None = None
+    run_id: str | None = None
 
 
 class SubmitRequest(PRTarget):
@@ -179,6 +195,7 @@ class ReviewStateModel(BaseModel):
     flagged: dict[str, str] = {}
     comments: int = 0
     comment_threads: dict[str, list[CommentModel]] = {}
+    review_notes: list[ReviewNote] = []
     submitted: bool = False
 
     @classmethod
@@ -191,6 +208,7 @@ class ReviewStateModel(BaseModel):
                 k: [CommentModel.coerce(c) for c in v]
                 for k, v in state.get("comment_threads", {}).items()
             },
+            review_notes=[ReviewNote(**n) for n in state.get("review_notes", [])],
             submitted=bool(state.get("submitted", False)),
         )
 

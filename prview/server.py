@@ -136,7 +136,7 @@ def _sorted_files(files: list[core.FileDiff]) -> list[core.FileDiff]:
 
 def _load_pr(owner: str, repo: str, number: int) -> PRResponse:
     pr = gh.fetch_pr_info(owner, repo, number)
-    raw = gh.fetch_pr_diff(owner, repo, number)
+    raw = gh.fetch_pr_diff(owner, repo, number, base=pr.base)
     files = _sorted_files(core.parse_diff(raw))
     state = core.load_review_state(owner, repo, number)
     core.apply_saved_state(files, state)

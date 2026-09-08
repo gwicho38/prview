@@ -53,7 +53,7 @@ def _fake_diff():
 
 def _load_pr(client, monkeypatch):
     monkeypatch.setattr(gh, "fetch_pr_info", lambda o, r, n: _fake_pr())
-    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n: _fake_diff())
+    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n, base="": _fake_diff())
     return client.post("/pr", json={"ref": "octo/hello#7"})
 
 
@@ -365,7 +365,7 @@ def test_get_overview_hit_and_sha_invalidation(client, monkeypatch):
 
     # New head SHA → cached overview is stale → markdown withheld.
     monkeypatch.setattr(gh, "fetch_pr_info", lambda o, r, n: _fake_pr(head_sha="sha-b"))
-    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n: _fake_diff())
+    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n, base="": _fake_diff())
     client.post("/pr", json={"ref": "octo/hello#7"})
     data = client.get("/overview/octo/hello/7").json()
     assert data == {"markdown": None, "sha": "sha-a", "stale": True}

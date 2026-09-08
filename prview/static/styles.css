@@ -968,3 +968,5 @@ html[data-wrap="on"] .diff-region .fullfile td.ff-code {
 }
 .badge-fix { font-weight: 700; }
 .draft-actions { display: flex; gap: 8px; margin-top: 4px; }
+.review-panel { grid-column: 1 / -1; padding: 10px 14px; }
+.run-row { display: flex; gap: 12px; align-items: baseline; margin-bottom: 6px; }

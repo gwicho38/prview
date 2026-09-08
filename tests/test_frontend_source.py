@@ -373,3 +373,25 @@ def test_inline_and_file_level_comments_both_render_draft_affordances():
     assert "draftActions" in APP_JS[inline:inline + 1600]
     bubbles = APP_JS.index("function renderCommentBubbles")
     assert "draftActions" in APP_JS[bubbles:bubbles + 900]
+
+
+def test_pr_level_findings_have_somewhere_to_render():
+    assert "renderReviewPanel" in APP_JS
+    assert "review_notes" in APP_JS
+    assert "Findings with no file" in APP_JS
+
+
+def test_a_run_can_be_cleared_from_the_panel():
+    assert "/reviews/run/clear" in APP_JS
+    assert "your own comments are untouched" in APP_JS
+
+
+def test_the_panel_follows_review_state_not_the_diff_render():
+    # It depends only on State.review, so it re-renders where that is assigned
+    # rather than on every file navigation.
+    start = APP_JS.index("async function refreshReviewState")
+    assert "renderReviewPanel" in APP_JS[start:start + 700]
+
+
+def test_the_panel_says_staged_findings_are_not_posted():
+    assert "not posted" in APP_JS

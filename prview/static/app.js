@@ -476,6 +476,7 @@ function enterReview(data) {
   State.behaviors = null;
   State.collapsed = {};
   State.review = data.review || data.state; // server key is `state`
+  if (typeof renderReviewPanel === "function") renderReviewPanel();
   State.detailCache = {};
   State.fullCache = {};
   State.ai = {};
@@ -1095,9 +1096,9 @@ function draftActions(c) {
   return wrap;
 }
 
+// refreshReviewState already re-renders the panel, so this only needs the diff.
 function rerenderStaged() {
   renderFileDetail();
-  if (typeof renderReviewPanel === "function") renderReviewPanel();
 }
 
 function makeBubble(c) {
@@ -2265,6 +2266,71 @@ function openCommentComposer({ title, label, placeholder, textareaId, autofocus,
 }
 
 
+
+// ---- component:review-panel ------------------------------------------------
+// Holds what cannot sit inline: findings that anchor to no file, and the
+// per-run controls. Cross-file findings are what an adversarial review is best
+// at and exactly what GitHub cannot anchor, so they need a home.
+function renderReviewPanel() {
+  const host = document.getElementById("review-panel");
+  if (!host) return;
+  host.innerHTML = "";
+
+  const review = State.review || {};
+  const notes = review.review_notes || [];
+  const runs = new Map();
+  const bump = (runId) => runs.set(runId || "unattributed",
+                                   (runs.get(runId || "unattributed") || 0) + 1);
+  for (const entries of Object.values(review.comment_threads || {})) {
+    for (const c of entries) if (c.staged) bump(c.run_id);
+  }
+  for (const n of notes) bump(n.run_id);
+
+  if (!runs.size) { host.hidden = true; return; }
+  host.hidden = false;
+
+  const title = document.createElement("h3");
+  const total = [...runs.values()].reduce((a, b) => a + b, 0);
+  title.textContent = `${total} staged finding${total === 1 ? "" : "s"} — not posted`;
+  host.appendChild(title);
+
+  for (const [runId, count] of runs) {
+    const row = document.createElement("div");
+    row.className = "run-row";
+    const label = document.createElement("span");
+    label.textContent = `${count} from run ${String(runId).slice(0, 8)}`;
+    row.appendChild(label);
+    if (runId !== "unattributed") {
+      const clear = document.createElement("button");
+      clear.className = "btn btn-ghost";
+      clear.textContent = "Clear this run";
+      clear.addEventListener("click", async () => {
+        const res = await api("POST", "/reviews/run/clear", { ...prKey(), run_id: runId });
+        if (!res || !res.ok) { toast("could not clear the run", "error"); return; }
+        await refreshReviewState();
+        rerenderStaged();
+        toast("Run cleared — your own comments are untouched");
+      });
+      row.appendChild(clear);
+    }
+    host.appendChild(row);
+  }
+
+  if (notes.length) {
+    const heading = document.createElement("h4");
+    heading.textContent = "Findings with no file";
+    host.appendChild(heading);
+    for (const n of notes) {
+      const staged = { ...n, staged: true };
+      const badges = draftBadges(staged);
+      if (badges) host.appendChild(badges);
+      host.appendChild(makeBubble(staged));
+      const actions = draftActions(staged);
+      if (actions) host.appendChild(actions);
+    }
+  }
+}
+
 // ---- component:review-menu -------------------------------------------------
 // A review run stages findings into review state; it never reaches GitHub.
 let reviewRunId = null;
@@ -2380,6 +2446,7 @@ async function refreshReviewState() {
   State.review = st;
   const threads = st.comment_threads || {};
   for (const f of State.files || []) f.comments = threads[f.filename] || [];
+  renderReviewPanel();
 }
 
 async function pollReviewRun(runId) {
@@ -2392,7 +2459,6 @@ async function pollReviewRun(runId) {
       lastStaged = snap.staged;
       await refreshReviewState();
       renderFileDetail();
-      if (typeof renderReviewPanel === "function") renderReviewPanel();
     }
     if (snap.status !== "running") {
       reviewRunId = null;

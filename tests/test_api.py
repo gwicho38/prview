@@ -937,3 +937,79 @@ def test_clearing_a_run_reports_ok(client, monkeypatch):
         "owner": "octo", "repo": "hello", "number": 7, "run_id": "run-9",
     })
     assert res.json()["ok"] is True and seen["run"] == "run-9"
+
+
+def test_submitting_flushes_staged_comments_in_one_call(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "comment_threads": {"big.py": [
+            {"text": "draft one", "line": 11, "staged": True, "id": "d1"},
+            {"text": "already posted", "line": 4},
+            {"text": "file-level draft", "line": None, "staged": True, "id": "d3"},
+        ]},
+        "review_notes": [{"text": "no tests", "id": "n1"}],
+    })
+    calls = []
+    monkeypatch.setattr(gh, "submit_review_with_comments",
+                        lambda *a: (calls.append(a), (True, None))[1])
+    monkeypatch.setattr(gh, "latest_review_url", lambda o, r, n: "http://x")
+
+    res = client.post("/review/submit", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "event": "comment", "body": "b",
+    })
+    assert res.status_code == 200 and res.json()["ok"] is True
+    assert len(calls) == 1
+    owner, repo, number, event, body, comments = calls[0]
+    assert [c["body"] for c in comments] == ["draft one"]
+    # Neither unanchorable draft is dropped; both join the body.
+    assert "no tests" in body
+    assert "file-level draft" in body
+
+
+def test_a_submitted_draft_stops_being_staged(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "comment_threads": {"big.py": [
+            {"text": "d", "line": 11, "staged": True, "id": "d1"},
+        ]},
+        "review_notes": [{"text": "n", "id": "n1"}],
+    })
+    monkeypatch.setattr(gh, "submit_review_with_comments", lambda *a: (True, None))
+    monkeypatch.setattr(gh, "latest_review_url", lambda o, r, n: None)
+    client.post("/review/submit", json={
+        "owner": "octo", "repo": "hello", "number": 7, "event": "comment",
+    })
+    st = core.load_review_state("octo", "hello", 7)
+    assert st["comment_threads"]["big.py"][0]["staged"] is False
+    assert st["comments"] == 1
+    assert st["review_notes"] == []
+
+
+def test_a_failed_submit_leaves_every_draft_staged(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "comment_threads": {"big.py": [
+            {"text": "d", "line": 11, "staged": True, "id": "d1"},
+        ]},
+    })
+    monkeypatch.setattr(gh, "submit_review_with_comments", lambda *a: (False, "422"))
+    res = client.post("/review/submit", json={
+        "owner": "octo", "repo": "hello", "number": 7, "event": "comment",
+    })
+    assert res.json()["ok"] is False
+    st = core.load_review_state("octo", "hello", 7)
+    assert st["comment_threads"]["big.py"][0]["staged"] is True
+    assert st.get("submitted") is not True
+    assert st.get("comments", 0) == 0
+
+
+def test_a_submit_with_nothing_staged_keeps_the_proven_gh_path(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {"flagged": {"big.py": "why"}})
+    batched, plain = [], []
+    monkeypatch.setattr(gh, "submit_review_with_comments",
+                        lambda *a: (batched.append(a), (True, None))[1])
+    monkeypatch.setattr(gh, "submit_review",
+                        lambda *a: (plain.append(a), (True, ""))[1])
+    monkeypatch.setattr(gh, "latest_review_url", lambda o, r, n: None)
+    client.post("/review/submit", json={
+        "owner": "octo", "repo": "hello", "number": 7, "event": "comment",
+    })
+    assert batched == [] and len(plain) == 1

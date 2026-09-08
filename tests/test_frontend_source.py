@@ -395,3 +395,13 @@ def test_the_panel_follows_review_state_not_the_diff_render():
 
 def test_the_panel_says_staged_findings_are_not_posted():
     assert "not posted" in APP_JS
+
+
+def test_the_submit_screen_separates_ai_drafts_from_your_own():
+    assert "stagedSummary" in APP_JS
+    assert "review before posting" in APP_JS
+    assert "Your comments" in APP_JS
+
+
+def test_the_submit_summary_says_where_unanchored_findings_go():
+    assert "joins the review body" in APP_JS

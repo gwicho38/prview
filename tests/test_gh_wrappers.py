@@ -1,6 +1,7 @@
 """Tests for prview.gh — gh CLI wrappers. All subprocess calls are patched;
 no real gh process is ever spawned."""
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -352,3 +353,58 @@ def test_an_ordinary_gh_failure_is_not_retried_against_git(monkeypatch):
     with pytest.raises(GhError) as exc:
         gh.fetch_pr_diff("o", "r", 9, base="main")
     assert "Failed to fetch diff" in str(exc.value)
+
+
+# --- batched review submission ------------------------------------------------
+
+def test_staged_comments_go_out_as_one_review(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd):
+        seen["cmd"] = cmd
+        with open(cmd[cmd.index("--input") + 1]) as fh:
+            seen["payload"] = json.load(fh)
+        return _Result(stdout="{}")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    ok, err = gh.submit_review_with_comments(
+        "o", "r", 1, "comment", "body text",
+        [{"path": "a.py", "body": "boom", "line": 11, "side": "RIGHT",
+          "start_line": None}],
+    )
+    assert ok and err is None
+    assert seen["cmd"][0] == "gh"
+    assert seen["payload"]["event"] == "COMMENT"
+    assert seen["payload"]["body"] == "body text"
+    assert len(seen["payload"]["comments"]) == 1
+    # A null start_line is dropped, not sent: the API rejects it on a single-line
+    # comment.
+    assert "start_line" not in seen["payload"]["comments"][0]
+
+
+def test_a_multi_line_comment_keeps_its_start_line(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd):
+        with open(cmd[cmd.index("--input") + 1]) as fh:
+            seen["payload"] = json.load(fh)
+        return _Result(stdout="{}")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    gh.submit_review_with_comments("o", "r", 1, "comment", "", [
+        {"path": "a.py", "body": "b", "line": 12, "side": "RIGHT", "start_line": 10},
+    ])
+    assert seen["payload"]["comments"][0]["start_line"] == 10
+
+
+def test_the_payload_file_is_removed_even_when_gh_fails(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd):
+        seen["path"] = cmd[cmd.index("--input") + 1]
+        return _Result(returncode=1, stderr="422 bad line")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    ok, err = gh.submit_review_with_comments("o", "r", 1, "comment", "b", [])
+    assert ok is False and "422" in err
+    assert not os.path.exists(seen["path"])

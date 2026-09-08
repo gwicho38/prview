@@ -2639,6 +2639,57 @@ function openFlagModal() {
 // ============================================================================
 // screen:submit-review
 // ============================================================================
+// Provenance stays visible at the last gate: the failure mode of a pre-filled
+// review is posting a plausible finding nobody actually read.
+function stagedSummary() {
+  const review = State.review || {};
+  const rows = [];
+  for (const [path, entries] of Object.entries(review.comment_threads || {})) {
+    for (const c of entries) {
+      if (c.staged) {
+        rows.push({ path, line: c.line, source: c.source, severity: c.severity });
+      }
+    }
+  }
+  const notes = (review.review_notes || []).length;
+  if (!rows.length && !notes) return null;
+
+  const host = document.createElement("section");
+  host.className = "staged-summary";
+  const h = document.createElement("h3");
+  h.textContent = "About to post";
+  host.appendChild(h);
+
+  const bySource = new Map();
+  for (const r of rows) {
+    const key = r.source || "yours";
+    bySource.set(key, [...(bySource.get(key) || []), r]);
+  }
+  for (const [source, group] of bySource) {
+    const heading = document.createElement("h4");
+    heading.textContent = source === "yours"
+      ? `Your comments (${group.length})`
+      : `From ${source} (${group.length}) — review before posting`;
+    host.appendChild(heading);
+    const ul = document.createElement("ul");
+    for (const r of group) {
+      const li = document.createElement("li");
+      li.textContent = r.line == null
+        ? `${r.path} — no anchor, joins the review body`
+        : `${r.path}:${r.line}${r.severity ? ` · ${r.severity}` : ""}`;
+      ul.appendChild(li);
+    }
+    host.appendChild(ul);
+  }
+  if (notes) {
+    const para = document.createElement("p");
+    para.textContent =
+      `${notes} finding${notes === 1 ? "" : "s"} with no file — appended to the review body.`;
+    host.appendChild(para);
+  }
+  return host;
+}
+
 async function renderSubmit() {
   // Rehydrate working state from server before computing counts.
   try {
@@ -2678,6 +2729,9 @@ async function renderSubmit() {
     grid.appendChild(cell);
   }
   wrap.appendChild(grid);
+
+  const staged = stagedSummary();
+  if (staged) wrap.appendChild(staged);
 
   const cline = document.createElement("div");
   cline.className = "comments-line";

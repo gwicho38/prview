@@ -538,19 +538,64 @@ def _flagged_body(state: dict) -> str:
     return body
 
 
+def _staged_payload(state: dict) -> tuple[list[dict], list[str]]:
+    """Anchored staged drafts as gh review comments, plus the unanchorable ones
+    as body paragraphs. A file-level draft has no legal anchor, so it joins the
+    body rather than being dropped."""
+    comments, notes = [], []
+    for path, entries in state.get("comment_threads", {}).items():
+        for e in entries:
+            if not (isinstance(e, dict) and e.get("staged")):
+                continue
+            if e.get("line") is None:
+                notes.append(f"**{path}** — {e['text']}")
+                continue
+            comments.append({
+                "path": path, "body": e["text"], "line": e["line"],
+                "side": "RIGHT", "start_line": e.get("start_line"),
+            })
+    notes.extend(n["text"] for n in state.get("review_notes", []))
+    return comments, notes
+
+
 @app.post("/review/submit", response_model=SubmitResponse)
 def submit_review(req: SubmitRequest) -> SubmitResponse:
     state = core.load_review_state(req.owner, req.repo, req.number)
     body = req.body if req.body is not None else _flagged_body(state)
-    ok, err = gh.submit_review(req.owner, req.repo, req.number, req.event, body)
-    if ok:
-        def mutate(s: dict) -> dict:
-            s["submitted"] = True
-            return s
+    comments, notes = _staged_payload(state)
+    if notes:
+        body = "\n\n".join([body or "", *notes]).strip()
 
-        state_store.mutate_state(req.owner, req.repo, req.number, mutate)
-        return SubmitResponse(ok=True, url=gh.latest_review_url(req.owner, req.repo, req.number))
-    return SubmitResponse(ok=False, error=err or "review submission failed")
+    if comments:
+        ok, err = gh.submit_review_with_comments(
+            req.owner, req.repo, req.number, req.event, body, comments)
+    else:
+        # No inline comments to batch, so keep the proven `gh pr review` path —
+        # the reviews API rejects a COMMENT review carrying neither.
+        ok, err = gh.submit_review(req.owner, req.repo, req.number, req.event, body)
+    if not ok:
+        return SubmitResponse(ok=False, error=err or "review submission failed")
+
+    def mutate(s: dict) -> dict:
+        threads, posted = {}, 0
+        for path, entries in s.get("comment_threads", {}).items():
+            out = []
+            for e in entries:
+                if isinstance(e, dict) and e.get("staged"):
+                    posted += 1
+                    out.append({**e, "staged": False})
+                else:
+                    out.append(e)
+            threads[path] = out
+        s["comment_threads"] = threads
+        s["comments"] = int(s.get("comments", 0)) + posted
+        s["review_notes"] = []
+        s["submitted"] = True
+        return s
+
+    state_store.mutate_state(req.owner, req.repo, req.number, mutate)
+    return SubmitResponse(ok=True,
+                          url=gh.latest_review_url(req.owner, req.repo, req.number))
 
 
 @app.post("/review/archive", response_model=OkResponse)

@@ -338,3 +338,31 @@ def post_pr_review_comment(
         cmd += ["-F", f"start_line={start_line}", "-f", f"start_side={start_side or side}"]
     result = _run(cmd)
     return result.returncode == 0
+
+
+def submit_review_with_comments(owner: str, repo: str, number: int, event: str,
+                                body: str,
+                                comments: list[dict]) -> tuple[bool, str | None]:
+    """Post a review body and all its inline comments as ONE review.
+
+    Per-comment posting has no transaction: a failure partway leaves some
+    comments public with no clean retry, which matters once findings arrive by
+    the dozen rather than one at a time.
+    """
+    payload = {
+        "event": event.upper(),
+        "body": body,
+        "comments": [{k: v for k, v in c.items() if v is not None} for c in comments],
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+        json.dump(payload, fh)
+        path = fh.name
+    try:
+        result = _run(["gh", "api", "--method", "POST",
+                       f"repos/{owner}/{repo}/pulls/{number}/reviews",
+                       "--input", path])
+    finally:
+        os.unlink(path)
+    if result.returncode != 0:
+        return False, result.stderr.strip() or "review submission failed"
+    return True, None

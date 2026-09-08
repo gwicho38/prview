@@ -1038,10 +1038,72 @@ function commentLabel(c) {
     ? `lines ${c.start_line}–${c.line}` : `line ${c.line}`;
 }
 
+// Badges are elements, never interpolated markup: a finding's text comes from a
+// model that read an untrusted branch.
+function draftBadges(c) {
+  if (!c.staged) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "draft-badges";
+  for (const [text, cls] of [["DRAFT", "badge-draft"],
+                             [c.severity, `badge-${c.severity}`],
+                             [c.source, "badge-source"]]) {
+    if (!text) continue;
+    const b = document.createElement("span");
+    b.className = `badge ${cls}`;
+    b.textContent = text;
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+function draftActions(c) {
+  if (!c.staged || !c.id) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "draft-actions";
+
+  const edit = document.createElement("button");
+  edit.className = "btn btn-ghost";
+  edit.textContent = "Edit";
+  edit.addEventListener("click", () => openCommentComposer({
+    title: "Edit draft",
+    label: "Draft comment (not posted)",
+    placeholder: "What should this say?",
+    textareaId: "draft-text",
+    initial: c.text,
+    submitLabel: "Save draft",
+    autofocus: true,
+    submit: async (text) => {
+      const res = await api("PUT", "/reviews/draft", { ...prKey(), id: c.id, text });
+      if (!res || !res.ok) throw new Error((res && res.error) || "edit failed");
+      await refreshReviewState();
+      return { after: rerenderStaged, message: "Draft updated" };
+    },
+  }));
+
+  const drop = document.createElement("button");
+  drop.className = "btn btn-ghost";
+  drop.textContent = "Dismiss";
+  drop.addEventListener("click", async () => {
+    const res = await api("DELETE", "/reviews/draft", { ...prKey(), id: c.id });
+    if (!res || !res.ok) { toast("could not dismiss draft", "error"); return; }
+    await refreshReviewState();
+    rerenderStaged();
+    toast("Draft dismissed");
+  });
+
+  wrap.append(edit, drop);
+  return wrap;
+}
+
+function rerenderStaged() {
+  renderFileDetail();
+  if (typeof renderReviewPanel === "function") renderReviewPanel();
+}
+
 function makeBubble(c) {
   // Comment text is user-authored → textContent only (never innerHTML), XSS-safe.
   const bubble = document.createElement("div");
-  bubble.className = "comment-bubble";
+  bubble.className = c.staged ? "comment-bubble comment-draft" : "comment-bubble";
   bubble.textContent = c.text;
   return bubble;
 }
@@ -1054,9 +1116,18 @@ function renderCommentBubbles(container, f) {
   if (!list.length) return;
   const title = document.createElement("div");
   title.className = "fd-comments-title";
-  title.textContent = list.length === 1 ? "Your comment" : `Your comments (${list.length})`;
+  const drafts = list.filter((c) => c.staged).length;
+  title.textContent = drafts
+    ? `Comments (${list.length}) — ${drafts} staged`
+    : (list.length === 1 ? "Your comment" : `Your comments (${list.length})`);
   container.appendChild(title);
-  for (const c of list) container.appendChild(makeBubble(c));
+  for (const c of list) {
+    const badges = draftBadges(c);
+    if (badges) container.appendChild(badges);
+    container.appendChild(makeBubble(c));
+    const actions = draftActions(c);
+    if (actions) container.appendChild(actions);
+  }
 }
 
 // After the diff renders, drop each line-anchored comment into a row directly
@@ -1080,14 +1151,17 @@ function injectInlineComments(region, f) {
     td.colSpan = 2;
     const bubble = makeBubble(c);
     const lbl = commentLabel(c);
+    const badges = draftBadges(c);
+    if (badges) td.appendChild(badges);
     if (lbl) {
       const tag = document.createElement("div");
       tag.className = "fd-comments-title";
       tag.textContent = lbl;
-      td.append(tag, bubble);
-    } else {
-      td.appendChild(bubble);
+      td.appendChild(tag);
     }
+    td.appendChild(bubble);
+    const actions = draftActions(c);
+    if (actions) td.appendChild(actions);
     tr.appendChild(td);
     row.after(tr);
   }

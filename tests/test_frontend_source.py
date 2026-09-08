@@ -340,3 +340,36 @@ def test_the_run_poller_refreshes_the_file_view_as_findings_land():
 
 def test_the_status_strip_reports_demotions_and_unreadable_lines():
     assert "demoted" in APP_JS and "unreadable" in APP_JS
+
+
+def test_a_staged_comment_is_marked_as_a_draft():
+    assert "draftBadges" in APP_JS
+    assert '"DRAFT"' in APP_JS
+    assert "comment-draft" in APP_JS
+
+
+def test_draft_badges_are_elements_not_interpolated_markup():
+    start = APP_JS.index("function draftBadges")
+    body = APP_JS[start:APP_JS.index("function draftActions")]
+    assert "innerHTML" not in body
+    assert "createElement" in body
+    assert "textContent" in body
+
+
+def test_a_draft_can_be_edited_or_dismissed():
+    assert "/reviews/draft" in APP_JS
+    assert "draftActions" in APP_JS
+    assert "Save draft" in APP_JS
+
+
+def test_editing_a_draft_does_not_go_through_the_post_comment_path():
+    start = APP_JS.index("function draftActions")
+    body = APP_JS[start:start + 2000]
+    assert '"/comment"' not in body
+
+
+def test_inline_and_file_level_comments_both_render_draft_affordances():
+    inline = APP_JS.index("function injectInlineComments")
+    assert "draftActions" in APP_JS[inline:inline + 1600]
+    bubbles = APP_JS.index("function renderCommentBubbles")
+    assert "draftActions" in APP_JS[bubbles:bubbles + 900]

@@ -960,3 +960,11 @@ html[data-wrap="on"] .diff-region .fullfile td.ff-code {
   padding: 6px 10px; border: 1px solid currentColor; border-radius: 4px;
   background: var(--bg, #111); font-size: 0.85em;
 }
+.comment-bubble.comment-draft { border-left: 3px dashed currentColor; }
+.draft-badges { display: flex; gap: 6px; margin-bottom: 4px; }
+.badge {
+  font-size: 0.72em; letter-spacing: 0.04em; padding: 1px 6px;
+  border-radius: 3px; border: 1px solid currentColor;
+}
+.badge-fix { font-weight: 700; }
+.draft-actions { display: flex; gap: 8px; margin-top: 4px; }

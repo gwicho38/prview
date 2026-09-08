@@ -304,3 +304,39 @@ def test_explain_selection_runs_on_the_browser_engine_too():
 def test_the_selection_popover_builds_its_progress_row_without_innerhtml():
     # Model-load progress is third-party text; a DOM node cannot be markup.
     assert "body.replaceChildren(spinnerRow(p.text))" in APP_JS
+
+
+# --- Local AI review ----------------------------------------------------------
+
+def test_r_opens_the_review_menu():
+    assert 'case "r":' in APP_JS
+    assert "openReviewMenu" in APP_JS
+
+
+def test_the_review_menu_dims_skills_that_do_not_fit():
+    assert "reviewSkillRow" in APP_JS
+    assert "skill-misfit" in APP_JS
+
+
+def test_the_menu_shows_the_label_the_server_computed_over_the_description():
+    assert "skill.label || skill.description" in APP_JS
+
+
+def test_a_review_run_can_be_cancelled_while_it_runs():
+    assert "/cancel" in APP_JS
+    assert "cancelReviewRun" in APP_JS
+
+
+def test_cancelling_keeps_findings_already_staged():
+    assert "findings already staged are kept" in APP_JS
+
+
+def test_the_run_poller_refreshes_the_file_view_as_findings_land():
+    assert "pollReviewRun" in APP_JS
+    start = APP_JS.index("async function pollReviewRun")
+    body = APP_JS[start:start + 1200]
+    assert "refreshReviewState" in body and "renderFileDetail" in body
+
+
+def test_the_status_strip_reports_demotions_and_unreadable_lines():
+    assert "demoted" in APP_JS and "unreadable" in APP_JS

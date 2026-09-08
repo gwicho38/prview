@@ -947,3 +947,16 @@ html[data-wrap="on"] .diff-region .fullfile td.ff-code {
   #pr-summary-repowise .drawer-toggle { display: none; }
   .rw-embed-frame { margin: 6px; }
 }
+
+/* Local AI review: menu, run status, staged drafts */
+.review-menu .skill-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.skill-row { display: flex; gap: 10px; align-items: baseline; text-align: left; width: 100%; }
+.skill-row.skill-misfit { opacity: 0.55; }
+.skill-name { font-weight: 600; }
+.skill-note { font-size: 0.85em; opacity: 0.75; }
+#review-status {
+  position: fixed; bottom: 12px; left: 12px; z-index: 40;
+  display: flex; gap: 10px; align-items: center;
+  padding: 6px 10px; border: 1px solid currentColor; border-radius: 4px;
+  background: var(--bg, #111); font-size: 0.85em;
+}

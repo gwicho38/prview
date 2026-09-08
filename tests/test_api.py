@@ -758,3 +758,182 @@ def test_ai_prompt_requires_a_question_for_ask(client, monkeypatch):
     resp = client.post("/ai/prompt", json={
         "owner": "octo", "repo": "hello", "number": 7, "kind": "ask", "path": "big.py"})
     assert resp.status_code == 400
+
+
+# --- Local AI review ----------------------------------------------------------
+
+from prview import reviews, skills as skills_mod  # noqa: E402
+from prview.skills import ReviewSkill  # noqa: E402
+
+
+def test_the_skill_menu_labels_which_reviews_suit_the_pr(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(skills_mod, "discover_skills", lambda roots: [
+        ReviewSkill("pr-review", "Adversarial PR review", "/a"),
+        ReviewSkill("airgap-review",
+                    "airgapped deployment in ultron, docker-compose", "/b"),
+    ])
+    res = client.get("/reviews/skills/octo/hello/7")
+    assert res.status_code == 200
+    rows = {s["name"]: s for s in res.json()["skills"]}
+    assert rows["pr-review"]["fits"] is True
+    assert rows["airgap-review"]["fits"] is False
+    assert rows["airgap-review"]["label"]
+
+
+def test_the_skill_menu_puts_the_ones_that_fit_first(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(skills_mod, "discover_skills", lambda roots: [
+        ReviewSkill("airgap-review", "ultron docker-compose", "/b"),
+        ReviewSkill("pr-review", "Adversarial PR review", "/a"),
+    ])
+    names = [s["name"] for s in client.get("/reviews/skills/octo/hello/7").json()["skills"]]
+    assert names == ["pr-review", "airgap-review"]
+
+
+def test_the_skill_menu_needs_the_pr_loaded(client, monkeypatch):
+    assert client.get("/reviews/skills/octo/hello/7").status_code == 409
+
+
+def test_starting_a_run_returns_its_id(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(reviews, "active_run_for", lambda o, r, n: None)
+    monkeypatch.setattr(reviews, "start_review", lambda *a, **k: "run-1")
+    res = client.post("/reviews/run", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "skill": "pr-review", "scope": "file", "paths": ["big.py"],
+    })
+    assert res.status_code == 200 and res.json()["run_id"] == "run-1"
+
+
+def test_a_scoped_run_only_sends_the_chosen_paths(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    seen = {}
+    monkeypatch.setattr(reviews, "active_run_for", lambda o, r, n: None)
+
+    def fake_start(owner, repo, number, skill, scope, scope_paths, added, *a):
+        seen["paths"], seen["added"] = scope_paths, added
+        return "run-1"
+
+    monkeypatch.setattr(reviews, "start_review", fake_start)
+    client.post("/reviews/run", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "skill": "pr-review", "scope": "file", "paths": ["big.py"],
+    })
+    assert seen["paths"] == ["big.py"]
+    # The whole PR's anchorable lines still go, so a finding on another file
+    # can be demoted rather than silently anchored.
+    assert set(seen["added"]) == {"big.py", "small.py"}
+
+
+def test_an_unscoped_run_sends_every_file(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    seen = {}
+    monkeypatch.setattr(reviews, "active_run_for", lambda o, r, n: None)
+    monkeypatch.setattr(reviews, "start_review",
+                        lambda o, r, n, s, sc, paths, added, *a:
+                        (seen.update(paths=paths), "run-1")[1])
+    client.post("/reviews/run", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "skill": "pr-review", "scope": "all",
+    })
+    assert set(seen["paths"]) == {"big.py", "small.py"}
+
+
+def test_a_second_run_while_one_is_live_is_refused(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(reviews, "active_run_for", lambda o, r, n: "run-1")
+    res = client.post("/reviews/run", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "skill": "pr-review", "scope": "file", "paths": ["big.py"],
+    })
+    assert res.status_code == 409
+
+
+def test_a_run_with_no_local_clone_says_what_to_do(client, monkeypatch):
+    _load_pr(client, monkeypatch)
+    monkeypatch.setattr(reviews, "active_run_for", lambda o, r, n: None)
+
+    def boom(*a, **k):
+        raise RuntimeError("no local clone configured for octo/hello")
+
+    monkeypatch.setattr(reviews, "start_review", boom)
+    res = client.post("/reviews/run", json={
+        "owner": "octo", "repo": "hello", "number": 7,
+        "skill": "pr-review", "scope": "file",
+    })
+    assert res.status_code == 400
+    assert "local clone" in res.json()["error"]
+
+
+def test_a_run_snapshot_reports_counts(client, monkeypatch):
+    monkeypatch.setattr(reviews, "get_run", lambda rid: {
+        "id": rid, "status": "running", "skill": "pr-review", "scope": "file",
+        "staged": 4, "dropped": 1, "demoted": 2, "error": None, "elapsed": 3.0,
+    })
+    body = client.get("/reviews/run/run-1").json()
+    assert (body["staged"], body["demoted"], body["dropped"]) == (4, 2, 1)
+
+
+def test_an_unknown_run_is_a_404(client, monkeypatch):
+    monkeypatch.setattr(reviews, "get_run", lambda rid: None)
+    assert client.get("/reviews/run/nope").status_code == 404
+
+
+def test_editing_a_draft_rewrites_only_that_draft(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "comment_threads": {"big.py": [
+            {"text": "one", "line": 3, "staged": True, "id": "d1"},
+            {"text": "two", "line": 4, "staged": True, "id": "d2"},
+        ]},
+    })
+    res = client.put("/reviews/draft", json={
+        "owner": "octo", "repo": "hello", "number": 7, "id": "d2", "text": "edited",
+    })
+    assert res.status_code == 200
+    threads = core.load_review_state("octo", "hello", 7)["comment_threads"]["big.py"]
+    assert [c["text"] for c in threads] == ["one", "edited"]
+
+
+def test_dismissing_a_draft_removes_it(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "comment_threads": {"big.py": [{"text": "one", "staged": True, "id": "d1"}]},
+    })
+    res = client.request("DELETE", "/reviews/draft", json={
+        "owner": "octo", "repo": "hello", "number": 7, "id": "d1",
+    })
+    assert res.status_code == 200
+    assert core.load_review_state("octo", "hello", 7)["comment_threads"] == {}
+
+
+def test_a_pr_level_note_can_be_edited_too(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "review_notes": [{"text": "no tests", "id": "n1"}],
+    })
+    res = client.put("/reviews/draft", json={
+        "owner": "octo", "repo": "hello", "number": 7, "id": "n1", "text": "some tests",
+    })
+    assert res.status_code == 200
+    assert core.load_review_state("octo", "hello", 7)["review_notes"][0]["text"] == "some tests"
+
+
+def test_a_posted_comment_cannot_be_edited_as_a_draft(client, monkeypatch):
+    core.save_review_state("octo", "hello", 7, {
+        "comment_threads": {"big.py": [{"text": "posted", "id": "p1"}]},
+    })
+    res = client.put("/reviews/draft", json={
+        "owner": "octo", "repo": "hello", "number": 7, "id": "p1", "text": "nope",
+    })
+    assert res.status_code == 404
+    threads = core.load_review_state("octo", "hello", 7)["comment_threads"]["big.py"]
+    assert threads[0]["text"] == "posted"
+
+
+def test_clearing_a_run_reports_ok(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(reviews, "clear_run",
+                        lambda o, r, n, rid: seen.update(run=rid) or 2)
+    res = client.post("/reviews/run/clear", json={
+        "owner": "octo", "repo": "hello", "number": 7, "run_id": "run-9",
+    })
+    assert res.json()["ok"] is True and seen["run"] == "run-9"

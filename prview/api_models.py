@@ -468,3 +468,45 @@ class BehaviorCommentResponse(BaseModel):
     anchored: bool
     path: str | None = None
     line: int | None = None
+
+
+class SkillRow(BaseModel):
+    name: str
+    description: str
+    fits: bool
+    label: str = ""
+
+
+class SkillsResponse(BaseModel):
+    skills: list[SkillRow]
+
+
+class RunReviewRequest(PRTarget):
+    skill: str
+    scope: str = "file"
+    paths: list[str] = []
+
+
+class RunIdResponse(BaseModel):
+    run_id: str
+
+
+class RunSnapshot(BaseModel):
+    id: str
+    status: str
+    skill: str
+    scope: str
+    staged: int
+    dropped: int
+    demoted: int
+    error: str | None = None
+    elapsed: float
+
+
+class ClearRunRequest(PRTarget):
+    run_id: str
+
+
+class DraftEditRequest(PRTarget):
+    id: str
+    text: str | None = None

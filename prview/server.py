@@ -34,10 +34,14 @@ import prview.gh as gh
 import prview.jobs as jobs
 import prview.order as order
 import prview.repowise as repowise
+import prview.reviews as reviews
+import prview.skills as skills
 import prview.state_store as state_store
 from prview.api_models import (
     ArchiveRequest,
     AskRequest,
+    ClearRunRequest,
+    DraftEditRequest,
     BehaviorCommentRequest,
     BehaviorCommentResponse,
     BehaviorModel,
@@ -79,6 +83,11 @@ from prview.api_models import (
     SubmitRequest,
     SubmitResponse,
     ViewedResponse,
+    RunIdResponse,
+    RunReviewRequest,
+    RunSnapshot,
+    SkillRow,
+    SkillsResponse,
 )
 from prview.cache import CACHE_MISS, PRCache
 from prview.security import SecurityMiddleware
@@ -668,6 +677,110 @@ def repowise_docs_generate_status(job_id: str) -> DocgenSnapshot:
 @app.post("/repowise/docs/generate/{job_id}/cancel", response_model=OkResponse)
 def repowise_docs_generate_cancel(job_id: str) -> OkResponse:
     return OkResponse(ok=repowise.cancel_docgen(job_id))
+
+
+# --- Local AI review ----------------------------------------------------------
+
+@app.get("/reviews/skills/{owner}/{repo}/{n}", response_model=SkillsResponse)
+def review_skills(owner: str, repo: str, n: int) -> SkillsResponse:
+    files = [fd.filename for fd in _cached(owner, repo, n)["files"]]
+    rows = []
+    for skill in skills.discover_skills(skills.default_roots()):
+        ok, label = skills.fits(skill, files, repo)
+        rows.append(SkillRow(name=skill.name, description=skill.description,
+                             fits=ok, label=label))
+    rows.sort(key=lambda r: (not r.fits, r.name))
+    return SkillsResponse(skills=rows)
+
+
+@app.post("/reviews/run", response_model=RunIdResponse)
+def run_review(req: RunReviewRequest) -> RunIdResponse:
+    if reviews.active_run_for(req.owner, req.repo, req.number):
+        raise _err(409, "a review is already running for this PR",
+                   "cancel it before starting another")
+    files = _cached(req.owner, req.repo, req.number)["files"]
+    added = {fd.filename: core.added_line_numbers(fd.diff_text) for fd in files}
+    scope_paths = req.paths or [fd.filename for fd in files]
+    try:
+        run_id = reviews.start_review(
+            req.owner, req.repo, req.number, req.skill, req.scope,
+            scope_paths, added,
+        )
+    except RuntimeError as exc:
+        raise _err(400, str(exc), "set a local repo path for this repository")
+    return RunIdResponse(run_id=run_id)
+
+
+@app.get("/reviews/run/{run_id}", response_model=RunSnapshot)
+def review_run(run_id: str) -> RunSnapshot:
+    snap = reviews.get_run(run_id)
+    if snap is None:
+        raise _err(404, "unknown review run")
+    return RunSnapshot(**snap)
+
+
+@app.post("/reviews/run/{run_id}/cancel", response_model=OkResponse)
+def cancel_review_run(run_id: str) -> OkResponse:
+    return OkResponse(ok=reviews.cancel_run(run_id))
+
+
+@app.post("/reviews/run/clear", response_model=OkResponse)
+def clear_review_run(req: ClearRunRequest) -> OkResponse:
+    reviews.clear_run(req.owner, req.repo, req.number, req.run_id)
+    return OkResponse(ok=True)
+
+
+def _edit_draft(req: DraftEditRequest, new_text: str | None) -> bool:
+    """Rewrite (new_text) or remove (None) one staged draft.
+
+    Only records with staged: true are reachable, so a posted comment can never
+    be rewritten through this path.
+    """
+    hit = False
+
+    def mutate(state: dict) -> dict:
+        nonlocal hit
+        threads = {}
+        for path, entries in state.get("comment_threads", {}).items():
+            kept = []
+            for e in entries:
+                if not (isinstance(e, dict) and e.get("staged")
+                        and e.get("id") == req.id):
+                    kept.append(e)
+                    continue
+                hit = True
+                if new_text is not None:
+                    kept.append({**e, "text": new_text})
+            if kept:
+                threads[path] = kept
+        notes = []
+        for note in state.get("review_notes", []):
+            if note.get("id") == req.id:
+                hit = True
+                if new_text is not None:
+                    notes.append({**note, "text": new_text})
+                continue
+            notes.append(note)
+        state["comment_threads"] = threads
+        state["review_notes"] = notes
+        return state
+
+    state_store.mutate_state(req.owner, req.repo, req.number, mutate)
+    return hit
+
+
+@app.put("/reviews/draft", response_model=OkResponse)
+def edit_draft(req: DraftEditRequest) -> OkResponse:
+    if not _edit_draft(req, req.text or ""):
+        raise _err(404, "no staged draft with that id")
+    return OkResponse(ok=True)
+
+
+@app.delete("/reviews/draft", response_model=OkResponse)
+def dismiss_draft(req: DraftEditRequest) -> OkResponse:
+    if not _edit_draft(req, None):
+        raise _err(404, "no staged draft with that id")
+    return OkResponse(ok=True)
 
 
 # --- Static assets ------------------------------------------------------------

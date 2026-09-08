@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import prview.core as core
+from prview.api_models import CommentModel, ReviewStateModel
 from prview.core import (
     FileDiff,
     _state_path,
@@ -134,3 +135,36 @@ def test_overview_corrupt_returns_empty(tmp_path, monkeypatch):
     tmp_path.mkdir(exist_ok=True)
     (tmp_path / "o-r-1-overview.json").write_text("{not json")
     assert core.load_overview("o", "r", 1) == {}
+
+
+# --- staged comment tier ------------------------------------------------------
+
+def test_a_comment_saved_before_staging_existed_still_loads():
+    c = CommentModel.coerce({"text": "hi", "line": 4})
+    assert c.staged is False
+    assert c.source is None and c.run_id is None
+
+
+def test_a_legacy_bare_string_comment_still_loads():
+    assert CommentModel.coerce("old style").text == "old style"
+
+
+def test_a_staged_finding_carries_its_provenance():
+    c = CommentModel.coerce({
+        "text": "IndexError on empty input", "line": 412, "staged": True,
+        "source": "pr-review", "severity": "fix", "id": "f1", "run_id": "r1",
+    })
+    assert (c.staged, c.source, c.severity) == (True, "pr-review", "fix")
+
+
+def test_state_with_no_review_notes_loads_with_an_empty_bucket():
+    st = ReviewStateModel.of({"viewed": [], "flagged": {}, "comments": 0})
+    assert st.review_notes == []
+
+
+def test_review_notes_round_trip():
+    st = ReviewStateModel.of({
+        "review_notes": [{"text": "no tests cover this", "source": "pr-review",
+                          "severity": "consider", "id": "n1", "run_id": "r1"}],
+    })
+    assert st.review_notes[0].text == "no tests cover this"

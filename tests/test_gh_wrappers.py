@@ -1,6 +1,7 @@
 """Tests for prview.gh — gh CLI wrappers. All subprocess calls are patched;
 no real gh process is ever spawned."""
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -276,3 +277,134 @@ def test_fetch_commit_files_returns_filenames(monkeypatch):
 def test_fetch_commit_files_tolerates_a_commit_with_no_files(monkeypatch):
     monkeypatch.setattr(gh, "_run", lambda cmd: _Result(0, json.dumps({})))
     assert gh.fetch_commit_files("o", "r", "aaa") == []
+
+
+# --- fetch_pr_diff: GitHub's 300-file diff cap --------------------------------
+
+_TOO_LARGE = ("HTTP 406: Sorry, the diff exceeded the maximum number of files "
+              "(300). Consider using 'List pull requests files' API")
+
+
+def test_a_normal_pr_diff_never_touches_git(monkeypatch):
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        return _Result(stdout="diff --git a/x b/x\n")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    assert gh.fetch_pr_diff("o", "r", 1, base="main") == "diff --git a/x b/x\n"
+    assert all(c[0] == "gh" for c in calls)
+
+
+def test_an_over_cap_pr_falls_back_to_the_local_clone(monkeypatch):
+    monkeypatch.setattr(gh.core, "get_repo_path", lambda o, r: "/repos/audio")
+
+    def fake_run(cmd):
+        if cmd[0] == "gh":
+            return _Result(returncode=1, stderr=_TOO_LARGE)
+        if "fetch" in cmd:
+            return _Result()
+        if "merge-base" in cmd:
+            return _Result(stdout="19f9b90\n")
+        if "diff" in cmd:
+            return _Result(stdout="diff --git a/big b/big\n")
+        raise AssertionError(f"unexpected argv: {cmd}")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    assert gh.fetch_pr_diff("o", "r", 40, base="main") == "diff --git a/big b/big\n"
+
+
+def test_the_fallback_diffs_the_pr_head_against_its_merge_base(monkeypatch):
+    monkeypatch.setattr(gh.core, "get_repo_path", lambda o, r: "/repos/audio")
+    seen = []
+
+    def fake_run(cmd):
+        seen.append(cmd)
+        if cmd[0] == "gh":
+            return _Result(returncode=1, stderr=_TOO_LARGE)
+        if "merge-base" in cmd:
+            return _Result(stdout="19f9b90\n")
+        return _Result(stdout="")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    gh.fetch_pr_diff("o", "r", 40, base="main")
+    fetch = next(c for c in seen if "fetch" in c)
+    assert fetch[-1] == "+pull/40/head:refs/prview/pr-40"
+    merge_base = next(c for c in seen if "merge-base" in c)
+    assert merge_base[-2:] == ["origin/main", "refs/prview/pr-40"]
+    diff = next(c for c in seen if c[3:4] == ["diff"])
+    assert diff[-2:] == ["19f9b90", "refs/prview/pr-40"]
+
+
+def test_an_over_cap_pr_with_no_local_clone_says_what_to_do(monkeypatch):
+    monkeypatch.setattr(gh.core, "get_repo_path", lambda o, r: None)
+    monkeypatch.setattr(gh, "_run",
+                        lambda cmd: _Result(returncode=1, stderr=_TOO_LARGE))
+    with pytest.raises(GhError) as exc:
+        gh.fetch_pr_diff("o", "r", 40, base="main")
+    assert "300-file" in str(exc.value)
+    assert "local repo path" in exc.value.hint
+
+
+def test_an_ordinary_gh_failure_is_not_retried_against_git(monkeypatch):
+    monkeypatch.setattr(gh, "_run",
+                        lambda cmd: _Result(returncode=1, stderr="not found"))
+    with pytest.raises(GhError) as exc:
+        gh.fetch_pr_diff("o", "r", 9, base="main")
+    assert "Failed to fetch diff" in str(exc.value)
+
+
+# --- batched review submission ------------------------------------------------
+
+def test_staged_comments_go_out_as_one_review(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd):
+        seen["cmd"] = cmd
+        with open(cmd[cmd.index("--input") + 1]) as fh:
+            seen["payload"] = json.load(fh)
+        return _Result(stdout="{}")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    ok, err = gh.submit_review_with_comments(
+        "o", "r", 1, "comment", "body text",
+        [{"path": "a.py", "body": "boom", "line": 11, "side": "RIGHT",
+          "start_line": None}],
+    )
+    assert ok and err is None
+    assert seen["cmd"][0] == "gh"
+    assert seen["payload"]["event"] == "COMMENT"
+    assert seen["payload"]["body"] == "body text"
+    assert len(seen["payload"]["comments"]) == 1
+    # A null start_line is dropped, not sent: the API rejects it on a single-line
+    # comment.
+    assert "start_line" not in seen["payload"]["comments"][0]
+
+
+def test_a_multi_line_comment_keeps_its_start_line(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd):
+        with open(cmd[cmd.index("--input") + 1]) as fh:
+            seen["payload"] = json.load(fh)
+        return _Result(stdout="{}")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    gh.submit_review_with_comments("o", "r", 1, "comment", "", [
+        {"path": "a.py", "body": "b", "line": 12, "side": "RIGHT", "start_line": 10},
+    ])
+    assert seen["payload"]["comments"][0]["start_line"] == 10
+
+
+def test_the_payload_file_is_removed_even_when_gh_fails(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd):
+        seen["path"] = cmd[cmd.index("--input") + 1]
+        return _Result(returncode=1, stderr="422 bad line")
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    ok, err = gh.submit_review_with_comments("o", "r", 1, "comment", "b", [])
+    assert ok is False and "422" in err
+    assert not os.path.exists(seen["path"])

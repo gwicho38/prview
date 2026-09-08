@@ -304,3 +304,104 @@ def test_explain_selection_runs_on_the_browser_engine_too():
 def test_the_selection_popover_builds_its_progress_row_without_innerhtml():
     # Model-load progress is third-party text; a DOM node cannot be markup.
     assert "body.replaceChildren(spinnerRow(p.text))" in APP_JS
+
+
+# --- Local AI review ----------------------------------------------------------
+
+def test_r_opens_the_review_menu():
+    assert 'case "r":' in APP_JS
+    assert "openReviewMenu" in APP_JS
+
+
+def test_the_review_menu_dims_skills_that_do_not_fit():
+    assert "reviewSkillRow" in APP_JS
+    assert "skill-misfit" in APP_JS
+
+
+def test_the_menu_shows_the_label_the_server_computed_over_the_description():
+    assert "skill.label || skill.description" in APP_JS
+
+
+def test_a_review_run_can_be_cancelled_while_it_runs():
+    assert "/cancel" in APP_JS
+    assert "cancelReviewRun" in APP_JS
+
+
+def test_cancelling_keeps_findings_already_staged():
+    assert "findings already staged are kept" in APP_JS
+
+
+def test_the_run_poller_refreshes_the_file_view_as_findings_land():
+    assert "pollReviewRun" in APP_JS
+    start = APP_JS.index("async function pollReviewRun")
+    body = APP_JS[start:start + 1200]
+    assert "refreshReviewState" in body and "renderFileDetail" in body
+
+
+def test_the_status_strip_reports_demotions_and_unreadable_lines():
+    assert "demoted" in APP_JS and "unreadable" in APP_JS
+
+
+def test_a_staged_comment_is_marked_as_a_draft():
+    assert "draftBadges" in APP_JS
+    assert '"DRAFT"' in APP_JS
+    assert "comment-draft" in APP_JS
+
+
+def test_draft_badges_are_elements_not_interpolated_markup():
+    start = APP_JS.index("function draftBadges")
+    body = APP_JS[start:APP_JS.index("function draftActions")]
+    assert "innerHTML" not in body
+    assert "createElement" in body
+    assert "textContent" in body
+
+
+def test_a_draft_can_be_edited_or_dismissed():
+    assert "/reviews/draft" in APP_JS
+    assert "draftActions" in APP_JS
+    assert "Save draft" in APP_JS
+
+
+def test_editing_a_draft_does_not_go_through_the_post_comment_path():
+    start = APP_JS.index("function draftActions")
+    body = APP_JS[start:start + 2000]
+    assert '"/comment"' not in body
+
+
+def test_inline_and_file_level_comments_both_render_draft_affordances():
+    inline = APP_JS.index("function injectInlineComments")
+    assert "draftActions" in APP_JS[inline:inline + 1600]
+    bubbles = APP_JS.index("function renderCommentBubbles")
+    assert "draftActions" in APP_JS[bubbles:bubbles + 900]
+
+
+def test_pr_level_findings_have_somewhere_to_render():
+    assert "renderReviewPanel" in APP_JS
+    assert "review_notes" in APP_JS
+    assert "Findings with no file" in APP_JS
+
+
+def test_a_run_can_be_cleared_from_the_panel():
+    assert "/reviews/run/clear" in APP_JS
+    assert "your own comments are untouched" in APP_JS
+
+
+def test_the_panel_follows_review_state_not_the_diff_render():
+    # It depends only on State.review, so it re-renders where that is assigned
+    # rather than on every file navigation.
+    start = APP_JS.index("async function refreshReviewState")
+    assert "renderReviewPanel" in APP_JS[start:start + 700]
+
+
+def test_the_panel_says_staged_findings_are_not_posted():
+    assert "not posted" in APP_JS
+
+
+def test_the_submit_screen_separates_ai_drafts_from_your_own():
+    assert "stagedSummary" in APP_JS
+    assert "review before posting" in APP_JS
+    assert "Your comments" in APP_JS
+
+
+def test_the_submit_summary_says_where_unanchored_findings_go():
+    assert "joins the review body" in APP_JS

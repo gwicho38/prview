@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 
+import prview.core as core
 from prview.core import PRInfo
 
 
@@ -93,17 +94,62 @@ def fetch_pr_info(owner: str, repo: str, number: int) -> PRInfo:
     )
 
 
-def fetch_pr_diff(owner: str, repo: str, number: int) -> str:
-    """Fetch the full PR diff (src 204-212)."""
+_OVER_CAP = "maximum number of files"
+
+_CAP_HINT = ("set a local repo path for this repository so prview can diff it "
+             "with git (Repowise tab -> local repo path)")
+
+
+def _git_pr_diff(repo_path: str, number: int, base: str) -> str:
+    """Unified diff of a PR head against its merge base, from a local clone.
+
+    Same output shape as `gh pr diff`, so every downstream parser is unchanged.
+    """
+    ref = f"refs/prview/pr-{number}"
+    # `+` forces our managed ref past a force-pushed head, as prepare_pr_worktree does.
+    fetch = _run(["git", "-C", repo_path, "fetch", "origin",
+                  f"+pull/{number}/head:{ref}"])
+    if fetch.returncode != 0:
+        raise GhError(f"git fetch of PR #{number} failed: {fetch.stderr.strip()}",
+                      hint="confirm origin points at the PR's repo and you have access")
+
+    base_ref = f"origin/{base}" if base else "origin/HEAD"
+    mb = _run(["git", "-C", repo_path, "merge-base", base_ref, ref])
+    if mb.returncode != 0:
+        raise GhError(f"no merge base between {base_ref} and PR #{number}",
+                      hint=f"run `git -C {repo_path} fetch origin` and retry")
+
+    out = _run(["git", "-C", repo_path, "diff", mb.stdout.strip(), ref])
+    if out.returncode != 0:
+        raise GhError(f"git diff failed: {out.stderr.strip()}")
+    return out.stdout
+
+
+def fetch_pr_diff(owner: str, repo: str, number: int, base: str = "") -> str:
+    """Fetch the full PR diff (src 204-212), falling back to the local clone.
+
+    GitHub refuses `gh pr diff` above 300 changed files; the local clone has no
+    such cap and is already required for the review worktree.
+    """
     result = _run(
         ["gh", "pr", "diff", str(number), "--repo", f"{owner}/{repo}"],
     )
-    if result.returncode != 0:
-        raise GhError(
-            f"Failed to fetch diff: {result.stderr.strip()}",
-            hint=_AUTH_HINT,
-        )
-    return result.stdout
+    if result.returncode == 0:
+        return result.stdout
+
+    if _OVER_CAP in result.stderr:
+        repo_path = core.get_repo_path(owner, repo)
+        if repo_path is None:
+            raise GhError(
+                f"{owner}/{repo}#{number} is over GitHub's 300-file diff cap",
+                hint=_CAP_HINT,
+            )
+        return _git_pr_diff(repo_path, number, base)
+
+    raise GhError(
+        f"Failed to fetch diff: {result.stderr.strip()}",
+        hint=_AUTH_HINT,
+    )
 
 
 def submit_review(owner: str, repo: str, number: int, event: str, body: str):
@@ -292,3 +338,31 @@ def post_pr_review_comment(
         cmd += ["-F", f"start_line={start_line}", "-f", f"start_side={start_side or side}"]
     result = _run(cmd)
     return result.returncode == 0
+
+
+def submit_review_with_comments(owner: str, repo: str, number: int, event: str,
+                                body: str,
+                                comments: list[dict]) -> tuple[bool, str | None]:
+    """Post a review body and all its inline comments as ONE review.
+
+    Per-comment posting has no transaction: a failure partway leaves some
+    comments public with no clean retry, which matters once findings arrive by
+    the dozen rather than one at a time.
+    """
+    payload = {
+        "event": event.upper(),
+        "body": body,
+        "comments": [{k: v for k, v in c.items() if v is not None} for c in comments],
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+        json.dump(payload, fh)
+        path = fh.name
+    try:
+        result = _run(["gh", "api", "--method", "POST",
+                       f"repos/{owner}/{repo}/pulls/{number}/reviews",
+                       "--input", path])
+    finally:
+        os.unlink(path)
+    if result.returncode != 0:
+        return False, result.stderr.strip() or "review submission failed"
+    return True, None

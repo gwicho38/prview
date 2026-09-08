@@ -476,6 +476,7 @@ function enterReview(data) {
   State.behaviors = null;
   State.collapsed = {};
   State.review = data.review || data.state; // server key is `state`
+  if (typeof renderReviewPanel === "function") renderReviewPanel();
   State.detailCache = {};
   State.fullCache = {};
   State.ai = {};
@@ -1038,10 +1039,72 @@ function commentLabel(c) {
     ? `lines ${c.start_line}–${c.line}` : `line ${c.line}`;
 }
 
+// Badges are elements, never interpolated markup: a finding's text comes from a
+// model that read an untrusted branch.
+function draftBadges(c) {
+  if (!c.staged) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "draft-badges";
+  for (const [text, cls] of [["DRAFT", "badge-draft"],
+                             [c.severity, `badge-${c.severity}`],
+                             [c.source, "badge-source"]]) {
+    if (!text) continue;
+    const b = document.createElement("span");
+    b.className = `badge ${cls}`;
+    b.textContent = text;
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+function draftActions(c) {
+  if (!c.staged || !c.id) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "draft-actions";
+
+  const edit = document.createElement("button");
+  edit.className = "btn btn-ghost";
+  edit.textContent = "Edit";
+  edit.addEventListener("click", () => openCommentComposer({
+    title: "Edit draft",
+    label: "Draft comment (not posted)",
+    placeholder: "What should this say?",
+    textareaId: "draft-text",
+    initial: c.text,
+    submitLabel: "Save draft",
+    autofocus: true,
+    submit: async (text) => {
+      const res = await api("PUT", "/reviews/draft", { ...prKey(), id: c.id, text });
+      if (!res || !res.ok) throw new Error((res && res.error) || "edit failed");
+      await refreshReviewState();
+      return { after: rerenderStaged, message: "Draft updated" };
+    },
+  }));
+
+  const drop = document.createElement("button");
+  drop.className = "btn btn-ghost";
+  drop.textContent = "Dismiss";
+  drop.addEventListener("click", async () => {
+    const res = await api("DELETE", "/reviews/draft", { ...prKey(), id: c.id });
+    if (!res || !res.ok) { toast("could not dismiss draft", "error"); return; }
+    await refreshReviewState();
+    rerenderStaged();
+    toast("Draft dismissed");
+  });
+
+  wrap.append(edit, drop);
+  return wrap;
+}
+
+// refreshReviewState already re-renders the panel, so this only needs the diff.
+function rerenderStaged() {
+  renderFileDetail();
+}
+
 function makeBubble(c) {
   // Comment text is user-authored → textContent only (never innerHTML), XSS-safe.
   const bubble = document.createElement("div");
-  bubble.className = "comment-bubble";
+  bubble.className = c.staged ? "comment-bubble comment-draft" : "comment-bubble";
   bubble.textContent = c.text;
   return bubble;
 }
@@ -1054,9 +1117,18 @@ function renderCommentBubbles(container, f) {
   if (!list.length) return;
   const title = document.createElement("div");
   title.className = "fd-comments-title";
-  title.textContent = list.length === 1 ? "Your comment" : `Your comments (${list.length})`;
+  const drafts = list.filter((c) => c.staged).length;
+  title.textContent = drafts
+    ? `Comments (${list.length}) — ${drafts} staged`
+    : (list.length === 1 ? "Your comment" : `Your comments (${list.length})`);
   container.appendChild(title);
-  for (const c of list) container.appendChild(makeBubble(c));
+  for (const c of list) {
+    const badges = draftBadges(c);
+    if (badges) container.appendChild(badges);
+    container.appendChild(makeBubble(c));
+    const actions = draftActions(c);
+    if (actions) container.appendChild(actions);
+  }
 }
 
 // After the diff renders, drop each line-anchored comment into a row directly
@@ -1080,14 +1152,17 @@ function injectInlineComments(region, f) {
     td.colSpan = 2;
     const bubble = makeBubble(c);
     const lbl = commentLabel(c);
+    const badges = draftBadges(c);
+    if (badges) td.appendChild(badges);
     if (lbl) {
       const tag = document.createElement("div");
       tag.className = "fd-comments-title";
       tag.textContent = lbl;
-      td.append(tag, bubble);
-    } else {
-      td.appendChild(bubble);
+      td.appendChild(tag);
     }
+    td.appendChild(bubble);
+    const actions = draftActions(c);
+    if (actions) td.appendChild(actions);
     tr.appendChild(td);
     row.after(tr);
   }
@@ -1215,6 +1290,7 @@ function buildActionBar(f) {
     mk("Ask", "a", () => focusAsk()),
     mk("Comment", "c", openCommentModal),
     mk("Flag", "f", openFlagModal),
+    mk("Review", "r", openReviewMenu),
   );
   return bar;
 }
@@ -2143,7 +2219,8 @@ function modalIsOpen() { return !document.getElementById("modal-root").hidden; }
 // ---- component:comment-composer -------------------------------------------
 // One composer for both comment scopes; `submit` owns the POST and its
 // bookkeeping and returns {message, after} for the shared success path.
-function openCommentComposer({ title, label, placeholder, textareaId, autofocus, submit }) {
+function openCommentComposer({ title, label, placeholder, textareaId, autofocus,
+                              initial, submitLabel, submit }) {
   openModal({
     title,
     render: (modal, body) => {
@@ -2154,6 +2231,7 @@ function openCommentComposer({ title, label, placeholder, textareaId, autofocus,
       ta.className = "textarea";
       if (textareaId) ta.id = textareaId;
       ta.placeholder = placeholder;
+      if (initial) ta.value = initial;
       body.append(lbl, ta);
 
       const foot = document.createElement("div");
@@ -2162,12 +2240,13 @@ function openCommentComposer({ title, label, placeholder, textareaId, autofocus,
       cancel.className = "btn"; cancel.textContent = "Cancel";
       cancel.addEventListener("click", closeModal);
       const post = document.createElement("button");
-      post.className = "btn btn-primary"; post.textContent = "Post comment";
+      post.className = "btn btn-primary";
+      post.textContent = submitLabel || "Post comment";
       post.addEventListener("click", async () => {
         const text = ta.value.trim();
         if (!text) { ta.focus(); return; }
         post.disabled = true; cancel.disabled = true;
-        post.innerHTML = '<span class="spinner spinner-sm"></span> Posting…';
+        post.innerHTML = '<span class="spinner spinner-sm"></span> Working…';
         try {
           const done = await submit(text);
           closeModal();
@@ -2175,7 +2254,7 @@ function openCommentComposer({ title, label, placeholder, textareaId, autofocus,
           toast((done && done.message) || "Comment posted");
         } catch (e) {
           post.disabled = false; cancel.disabled = false;
-          post.textContent = "Post comment";
+          post.textContent = submitLabel || "Post comment";
           toast(e.message || "comment failed", "error");
         }
       });
@@ -2184,6 +2263,223 @@ function openCommentComposer({ title, label, placeholder, textareaId, autofocus,
       if (autofocus) ta.focus();
     },
   });
+}
+
+
+
+// ---- component:review-panel ------------------------------------------------
+// Holds what cannot sit inline: findings that anchor to no file, and the
+// per-run controls. Cross-file findings are what an adversarial review is best
+// at and exactly what GitHub cannot anchor, so they need a home.
+function renderReviewPanel() {
+  const host = document.getElementById("review-panel");
+  if (!host) return;
+  host.innerHTML = "";
+
+  const review = State.review || {};
+  const notes = review.review_notes || [];
+  const runs = new Map();
+  const bump = (runId) => runs.set(runId || "unattributed",
+                                   (runs.get(runId || "unattributed") || 0) + 1);
+  for (const entries of Object.values(review.comment_threads || {})) {
+    for (const c of entries) if (c.staged) bump(c.run_id);
+  }
+  for (const n of notes) bump(n.run_id);
+
+  if (!runs.size) { host.hidden = true; return; }
+  host.hidden = false;
+
+  const title = document.createElement("h3");
+  const total = [...runs.values()].reduce((a, b) => a + b, 0);
+  title.textContent = `${total} staged finding${total === 1 ? "" : "s"} — not posted`;
+  host.appendChild(title);
+
+  for (const [runId, count] of runs) {
+    const row = document.createElement("div");
+    row.className = "run-row";
+    const label = document.createElement("span");
+    label.textContent = `${count} from run ${String(runId).slice(0, 8)}`;
+    row.appendChild(label);
+    if (runId !== "unattributed") {
+      const clear = document.createElement("button");
+      clear.className = "btn btn-ghost";
+      clear.textContent = "Clear this run";
+      clear.addEventListener("click", async () => {
+        const res = await api("POST", "/reviews/run/clear", { ...prKey(), run_id: runId });
+        if (!res || !res.ok) { toast("could not clear the run", "error"); return; }
+        await refreshReviewState();
+        rerenderStaged();
+        toast("Run cleared — your own comments are untouched");
+      });
+      row.appendChild(clear);
+    }
+    host.appendChild(row);
+  }
+
+  if (notes.length) {
+    const heading = document.createElement("h4");
+    heading.textContent = "Findings with no file";
+    host.appendChild(heading);
+    for (const n of notes) {
+      const staged = { ...n, staged: true };
+      const badges = draftBadges(staged);
+      if (badges) host.appendChild(badges);
+      host.appendChild(makeBubble(staged));
+      const actions = draftActions(staged);
+      if (actions) host.appendChild(actions);
+    }
+  }
+}
+
+// ---- component:review-menu -------------------------------------------------
+// A review run stages findings into review state; it never reaches GitHub.
+let reviewRunId = null;
+
+function reviewSkillRow(skill, onPick) {
+  const row = document.createElement("button");
+  row.className = skill.fits ? "btn btn-ghost skill-row" : "btn btn-ghost skill-row skill-misfit";
+  const name = document.createElement("span");
+  name.className = "skill-name";
+  name.textContent = skill.name;
+  const note = document.createElement("span");
+  note.className = "skill-note";
+  note.textContent = skill.label || skill.description;
+  row.append(name, note);
+  row.addEventListener("click", () => onPick(skill.name));
+  return row;
+}
+
+async function openReviewMenu() {
+  const { owner, repo, number } = prKey();
+  const res = await api("GET", `/reviews/skills/${owner}/${repo}/${number}`);
+  if (!res || !res.skills) { toast("could not list review skills", "error"); return; }
+  const f = currentFile();
+
+  openModal({
+    title: "Run review",
+    render: (modal, body) => {
+      body.className = "modal-body review-menu";
+      const scopeLabel = document.createElement("label");
+      scopeLabel.textContent = "Scope";
+      const scope = document.createElement("select");
+      scope.className = "select";
+      scope.id = "review-scope";
+      const options = [];
+      if (f) options.push(["file", `this file — ${f.filename}`]);
+      options.push(["all", `whole PR — ${State.files.length} files, slow`]);
+      for (const [value, text] of options) {
+        const o = document.createElement("option");
+        o.value = value; o.textContent = text;
+        scope.appendChild(o);
+      }
+      body.append(scopeLabel, scope);
+
+      const list = document.createElement("div");
+      list.className = "skill-list";
+      const pick = (name) => {
+        const chosen = scope.value;
+        closeModal();
+        startReviewRun(name, chosen,
+                       chosen === "file" && f ? [f.filename] : []);
+      };
+      for (const skill of res.skills) list.appendChild(reviewSkillRow(skill, pick));
+      body.appendChild(list);
+
+      if (!res.skills.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No review skills found under ~/.claude/skills.";
+        body.appendChild(empty);
+      }
+    },
+  });
+}
+
+async function startReviewRun(skill, scope, paths) {
+  const res = await api("POST", "/reviews/run", { ...prKey(), skill, scope, paths });
+  if (!res || !res.run_id) {
+    toast((res && res.error) || "could not start review", "error");
+    return;
+  }
+  reviewRunId = res.run_id;
+  toast(`${skill} started — findings appear as they are found`);
+  pollReviewRun(res.run_id);
+}
+
+function reviewStatusStrip() {
+  let strip = document.getElementById("review-status");
+  if (strip) return strip;
+  strip = document.createElement("div");
+  strip.id = "review-status";
+  strip.hidden = true;
+  const text = document.createElement("span");
+  text.id = "review-status-text";
+  const stop = document.createElement("button");
+  stop.className = "btn btn-ghost";
+  stop.textContent = "Cancel";
+  stop.addEventListener("click", cancelReviewRun);
+  strip.append(text, stop);
+  document.body.appendChild(strip);
+  return strip;
+}
+
+function setReviewStatus(snap) {
+  const strip = reviewStatusStrip();
+  const bits = [snap.skill, snap.status, `${snap.staged} staged`];
+  if (snap.demoted) bits.push(`${snap.demoted} demoted`);
+  if (snap.dropped) bits.push(`${snap.dropped} unreadable`);
+  bits.push(`${Math.round(snap.elapsed)}s`);
+  document.getElementById("review-status-text").textContent = bits.join(" · ");
+  strip.hidden = false;
+}
+
+function clearReviewStatus() {
+  const strip = document.getElementById("review-status");
+  if (strip) strip.hidden = true;
+}
+
+// Re-read persisted review state and reapply it to the loaded files, so staged
+// findings render without refetching the diff.
+async function refreshReviewState() {
+  const { owner, repo, number } = prKey();
+  const st = await api("GET", `/state/${owner}/${repo}/${number}`);
+  if (!st) return;
+  State.review = st;
+  const threads = st.comment_threads || {};
+  for (const f of State.files || []) f.comments = threads[f.filename] || [];
+  renderReviewPanel();
+}
+
+async function pollReviewRun(runId) {
+  let lastStaged = -1;
+  while (reviewRunId === runId) {
+    const snap = await api("GET", `/reviews/run/${runId}`);
+    if (!snap || !snap.status) break;
+    setReviewStatus(snap);
+    if (snap.staged !== lastStaged) {
+      lastStaged = snap.staged;
+      await refreshReviewState();
+      renderFileDetail();
+    }
+    if (snap.status !== "running") {
+      reviewRunId = null;
+      if (snap.status === "error") toast(snap.error || "review failed", "error");
+      else toast(`${snap.skill} ${snap.status} — ${snap.staged} staged`);
+      setTimeout(clearReviewStatus, 8000);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+async function cancelReviewRun() {
+  if (!reviewRunId) { clearReviewStatus(); return; }
+  const id = reviewRunId;
+  reviewRunId = null;
+  await api("POST", `/reviews/run/${id}/cancel`, {});
+  await refreshReviewState();
+  renderFileDetail();
+  toast("review cancelled — findings already staged are kept");
+  clearReviewStatus();
 }
 
 // ---- component:comment-modal ----------------------------------------------
@@ -2343,6 +2639,57 @@ function openFlagModal() {
 // ============================================================================
 // screen:submit-review
 // ============================================================================
+// Provenance stays visible at the last gate: the failure mode of a pre-filled
+// review is posting a plausible finding nobody actually read.
+function stagedSummary() {
+  const review = State.review || {};
+  const rows = [];
+  for (const [path, entries] of Object.entries(review.comment_threads || {})) {
+    for (const c of entries) {
+      if (c.staged) {
+        rows.push({ path, line: c.line, source: c.source, severity: c.severity });
+      }
+    }
+  }
+  const notes = (review.review_notes || []).length;
+  if (!rows.length && !notes) return null;
+
+  const host = document.createElement("section");
+  host.className = "staged-summary";
+  const h = document.createElement("h3");
+  h.textContent = "About to post";
+  host.appendChild(h);
+
+  const bySource = new Map();
+  for (const r of rows) {
+    const key = r.source || "yours";
+    bySource.set(key, [...(bySource.get(key) || []), r]);
+  }
+  for (const [source, group] of bySource) {
+    const heading = document.createElement("h4");
+    heading.textContent = source === "yours"
+      ? `Your comments (${group.length})`
+      : `From ${source} (${group.length}) — review before posting`;
+    host.appendChild(heading);
+    const ul = document.createElement("ul");
+    for (const r of group) {
+      const li = document.createElement("li");
+      li.textContent = r.line == null
+        ? `${r.path} — no anchor, joins the review body`
+        : `${r.path}:${r.line}${r.severity ? ` · ${r.severity}` : ""}`;
+      ul.appendChild(li);
+    }
+    host.appendChild(ul);
+  }
+  if (notes) {
+    const para = document.createElement("p");
+    para.textContent =
+      `${notes} finding${notes === 1 ? "" : "s"} with no file — appended to the review body.`;
+    host.appendChild(para);
+  }
+  return host;
+}
+
 async function renderSubmit() {
   // Rehydrate working state from server before computing counts.
   try {
@@ -2382,6 +2729,9 @@ async function renderSubmit() {
     grid.appendChild(cell);
   }
   wrap.appendChild(grid);
+
+  const staged = stagedSummary();
+  if (staged) wrap.appendChild(staged);
 
   const cline = document.createElement("div");
   cline.className = "comments-line";
@@ -3504,7 +3854,7 @@ function paintOverview() {
 }
 
 // ============================================================================
-// Global keyboard shortcuts: v e a c f s b j k q g
+// Global keyboard shortcuts: v e a c f r s b j k q g
 // ============================================================================
 function isTyping(e) {
   const t = e.target;
@@ -3563,6 +3913,7 @@ document.addEventListener("keydown", (e) => {
     case "a": e.preventDefault(); focusAsk(); break;
     case "c": e.preventDefault(); openCommentModal(); break;
     case "f": e.preventDefault(); openFlagModal(); break;
+    case "r": e.preventDefault(); openReviewMenu(); break;
     case "t": e.preventDefault(); toggleHideTests(); break;
     case "o": e.preventDefault(); cycleOrder(); break;
     case "G": e.preventDefault(); if (!State.standalone) toggleGrouped(); break;

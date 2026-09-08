@@ -90,7 +90,7 @@ def test_client_string_reaches_argv_only(tmp_path, monkeypatch):
     c.headers.update({"X-Prview-Token": TOKEN, "Host": "127.0.0.1"})
 
     monkeypatch.setattr(gh, "fetch_pr_info", lambda o, r, n: core.PRInfo(owner="o", repo="r", number=1, title="t"))
-    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n: "diff --git a/f.py b/f.py\n+x\n")
+    monkeypatch.setattr(gh, "fetch_pr_diff", lambda o, r, n, base="": "diff --git a/f.py b/f.py\n+x\n")
     c.post("/pr", json={"ref": "o/r#1"})
 
     captured = {}

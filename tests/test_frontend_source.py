@@ -405,3 +405,33 @@ def test_the_submit_screen_separates_ai_drafts_from_your_own():
 
 def test_the_submit_summary_says_where_unanchored_findings_go():
     assert "joins the review body" in APP_JS
+
+
+# --- default sidebar view -----------------------------------------------------
+
+def test_the_default_view_groups_by_behavior_and_hides_tests():
+    assert "grouped: true," in APP_JS
+    assert "hideTests: true," in APP_JS
+
+
+def test_turning_grouping_off_survives_a_reload():
+    # Persisted as "0"; absent means grouped, so the default is not re-applied
+    # over an explicit opt-out.
+    assert 'localStorage.getItem(GROUP_KEY) !== "0"' in APP_JS
+
+
+def test_grouping_on_by_default_still_fetches_its_behaviors():
+    start = APP_JS.index("function enterReview")
+    body = APP_JS[start:APP_JS.index("function firstUnviewedIndex")]
+    assert "loadBehaviors({ quiet: true })" in body
+
+
+def test_the_automatic_behavior_load_does_not_toast():
+    assert "async function loadBehaviors({ quiet = false } = {})" in APP_JS
+    assert "if (!res.groupable && !quiet)" in APP_JS
+
+
+def test_the_first_selected_file_is_never_one_the_filter_hides():
+    start = APP_JS.index("function firstUnviewedIndex")
+    body = APP_JS[start:start + 500]
+    assert "isHidden" in body

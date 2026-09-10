@@ -85,8 +85,11 @@ function savedModel() {
 
 function browserEngineAvailable() { return !!navigator.gpu; }
 
+// Absent means grouped: the default view groups by behavior. Only an explicit
+// opt-out ("0", written by toggleGrouped) stays flat, so a reviewer who turned
+// grouping off keeps that choice.
 function savedGrouped() {
-  try { return localStorage.getItem(GROUP_KEY) === "1"; } catch { return false; }
+  try { return localStorage.getItem(GROUP_KEY) !== "0"; } catch { return true; }
 }
 
 const State = {
@@ -100,9 +103,9 @@ const State = {
   ai: {},              // path -> {mode, status, jobId, result, qa, timer, t0, prevMode}
   rw: null,            // repowise prepare state for the current PR (see Repowise)
   standalone: false,   // true when viewing a local repo without a PR
-  hideTests: false,    // UI-only: drop test files from the file list + n/p nav
+  hideTests: true,     // UI-only: drop test files from the file list + n/p nav
   engine: "claude",     // AI engine: "claude" (local CLI) or "browser" (WebGPU model)
-  grouped: false,       // sidebar groups files under behaviors
+  grouped: true,        // sidebar groups files under behaviors
   behaviors: null,      // [BehaviorModel] once loaded; null = not fetched
   collapsed: {},        // behavior id -> true; per-PR, not a preference
   rowOrder: [],          // flat indices in the exact order the sidebar last rendered
@@ -489,6 +492,14 @@ function enterReview(data) {
   renderSummary();
   renderFileList();
   selectFile(State.idx);
+  // Grouping costs one gh call per commit, so it lands after first paint rather
+  // than delaying it. Quiet: the reviewer did not ask, so an ungroupable PR is
+  // not worth a toast.
+  if (State.grouped) {
+    loadBehaviors({ quiet: true }).then(() => {
+      if (groupingActive()) keepCurrentVisible();
+    });
+  }
 }
 
 function applyReviewToFiles() {
@@ -505,8 +516,12 @@ function applyReviewToFiles() {
 }
 
 function firstUnviewedIndex() {
-  const i = State.files.findIndex((f) => !f.viewed);
-  return i === -1 ? 0 : i;
+  // Skips filtered-out files: landing on one leaves the detail pane showing a
+  // file the sidebar does not list.
+  const unviewed = State.files.findIndex((f) => !f.viewed && !isHidden(f));
+  if (unviewed !== -1) return unviewed;
+  const visible = State.files.findIndex((f) => !isHidden(f));
+  return visible === -1 ? 0 : visible;
 }
 
 function viewedCount() { return State.files.filter((f) => f.viewed).length; }
@@ -981,15 +996,15 @@ function setOrder(mode) {
   renderFileList();
 }
 
-async function loadBehaviors() {
+async function loadBehaviors({ quiet = false } = {}) {
   try {
     const res = await api("GET", `/pr/${State.pr.owner}/${State.pr.repo}/${State.pr.number}/behaviors`);
     State.behaviors = res.groupable ? res.behaviors : [];
-    if (!res.groupable) toast("Single commit — nothing to group", "error");
+    if (!res.groupable && !quiet) toast("Single commit — nothing to group", "error");
   } catch (e) {
     // Transient (e.g. gh) failure — leave State.behaviors unset so the next toggle retries.
     State.behaviors = null;
-    toast(e.message || "could not group by behavior", "error");
+    if (!quiet) toast(e.message || "could not group by behavior", "error");
   }
 }
 
